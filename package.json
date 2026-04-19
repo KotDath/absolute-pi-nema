@@ -1,0 +1,25 @@
+{
+	"private": true,
+	"packageManager": "pnpm@10.33.0",
+	"workspaces": ["packages/*"],
+	"scripts": {
+		"build": "pnpm -r run build",
+		"typecheck": "pnpm -r run typecheck",
+		"lint": "biome check --error-on-warnings .",
+		"lint:fix": "biome check --fix .",
+		"format": "biome format --write .",
+		"check": "biome ci --error-on-warnings ."
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.4.10",
+		"@mariozechner/pi-agent-core": "0.56.1",
+		"@mariozechner/pi-ai": "0.56.1",
+		"@mariozechner/pi-coding-agent": "0.56.1",
+		"@mariozechner/pi-tui": "0.56.1",
+		"@types/node": "^22.0.0",
+		"typescript": "^5.7.0"
+	},
+	"engines": {
+		"node": ">=20.0.0"
+	}
+}
