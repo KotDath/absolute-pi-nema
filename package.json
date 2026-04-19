@@ -21,5 +21,11 @@
 	},
 	"engines": {
 		"node": ">=20.0.0"
+	},
+	"pi": {
+		"extensions": [
+			"./packages/absolute-qwen/index.ts",
+			"./packages/absolute-plan/index.ts"
+		]
 	}
 }
