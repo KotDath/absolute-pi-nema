@@ -24,6 +24,16 @@ const extensionPaths = [
 	path.join(repoRoot, "packages", "absolute-plan", "index.ts"),
 ];
 
+function createEmptyUsage() {
+	return {
+		input: 0,
+		output: 0,
+		cacheRead: 0,
+		cacheWrite: 0,
+		totalTokens: 0,
+	};
+}
+
 function parseArgs(argv) {
 	const parsed = {
 		list: false,
@@ -99,7 +109,7 @@ function applyTemplate(text, values) {
 }
 
 async function createFixtureWorkspace(fixtureName) {
-	const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "absolute-pi-bench-"));
+	const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "apb-"));
 	const fixtureTemplateRoot = fixtureName ? path.join(fixturesRoot, fixtureName) : null;
 
 	if (fixtureTemplateRoot) {
@@ -133,6 +143,37 @@ function collectToolCalls(messages) {
 
 function collectToolResults(messages) {
 	return messages.filter((message) => message.role === "toolResult");
+}
+
+function collectUsage(messages) {
+	const usage = createEmptyUsage();
+	const assistantMessages = messages.filter((message) => message.role === "assistant");
+
+	for (const message of assistantMessages) {
+		const current = message.usage;
+		if (!current) {
+			continue;
+		}
+		usage.input += current.input ?? 0;
+		usage.output += current.output ?? 0;
+		usage.cacheRead += current.cacheRead ?? 0;
+		usage.cacheWrite += current.cacheWrite ?? 0;
+		usage.totalTokens += current.totalTokens ?? 0;
+	}
+
+	return usage;
+}
+
+function formatUsage(usage) {
+	return `in=${usage.input} out=${usage.output} cache-r=${usage.cacheRead} cache-w=${usage.cacheWrite} total=${usage.totalTokens}`;
+}
+
+function addUsageTotals(target, source) {
+	target.input += source.input;
+	target.output += source.output;
+	target.cacheRead += source.cacheRead;
+	target.cacheWrite += source.cacheWrite;
+	target.totalTokens += source.totalTokens;
 }
 
 async function runPiScenario(scenario, fixtureRoot) {
@@ -270,25 +311,48 @@ async function assertScenario(scenario, fixtureRoot, trace) {
 	}
 }
 
+function collectScenarioMetrics(trace) {
+	const agentEnd = trace.find((event) => event.type === "agent_end");
+	if (!agentEnd) {
+		throw new Error("Trace does not contain agent_end.");
+	}
+
+	const messages = agentEnd.messages ?? [];
+	const assistantMessages = messages.filter((message) => message.role === "assistant");
+	const finalAssistant = assistantMessages.at(-1);
+
+	return {
+		provider: finalAssistant?.provider ?? null,
+		model: finalAssistant?.model ?? null,
+		usage: collectUsage(messages),
+	};
+}
+
 async function runScenario(scenario) {
 	const fixtureRoot = await createFixtureWorkspace(scenario.fixture);
 	const tracePath = path.join(fixtureRoot, "trace.jsonl");
+	const metricsPath = path.join(fixtureRoot, "metrics.json");
 
 	try {
 		const { stdout } = await runPiScenario(scenario, fixtureRoot);
 		await fs.writeFile(tracePath, stdout, "utf8");
 		const trace = parseJsonLines(stdout);
+		const metrics = collectScenarioMetrics(trace);
+		await fs.writeFile(metricsPath, `${JSON.stringify(metrics, null, 2)}\n`, "utf8");
 		await assertScenario(scenario, fixtureRoot, trace);
 		return {
 			status: "passed",
 			fixtureRoot,
 			tracePath,
+			metricsPath,
+			metrics,
 		};
 	} catch (error) {
 		return {
 			status: "failed",
 			fixtureRoot,
 			tracePath,
+			metricsPath,
 			error: error instanceof Error ? error : new Error(String(error)),
 		};
 	}
@@ -312,11 +376,13 @@ async function main() {
 	}
 
 	let failures = 0;
+	const totalUsage = createEmptyUsage();
 	for (const scenario of scenarios) {
 		process.stdout.write(`RUN ${scenario.suite}/${scenario.id} ... `);
 		const result = await runScenario(scenario);
 		if (result.status === "passed") {
-			console.log("ok");
+			addUsageTotals(totalUsage, result.metrics.usage);
+			console.log(`ok (${formatUsage(result.metrics.usage)})`);
 			continue;
 		}
 
@@ -324,6 +390,7 @@ async function main() {
 		console.log("fail");
 		console.error(`  fixture: ${result.fixtureRoot}`);
 		console.error(`  trace:   ${result.tracePath}`);
+		console.error(`  metrics: ${result.metricsPath}`);
 		console.error(`  error:   ${result.error.message}`);
 	}
 
@@ -334,6 +401,7 @@ async function main() {
 	}
 
 	console.log(`\nAll ${scenarios.length} benchmark scenario(s) passed.`);
+	console.log(`Total usage: ${formatUsage(totalUsage)}`);
 }
 
 await main();

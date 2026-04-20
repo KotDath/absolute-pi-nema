@@ -60,7 +60,152 @@ function createContext(cwd: string) {
 	return { cwd } as ExtensionContext;
 }
 
+function getTextContent(result: AgentToolResult<unknown>) {
+	return result.content
+		.filter((item) => item.type === "text")
+		.map((item) => item.text ?? "")
+		.join("\n");
+}
+
 describe("absolute-qwen tool contracts", () => {
+	it("paginates large reads with a bounded default page size", async () => {
+		const tempDir = await createTempDir();
+		const filePath = path.join(tempDir, "large.txt");
+		const content = Array.from({ length: 300 }, (_, index) => `line ${index + 1}`).join("\n");
+		await fs.writeFile(filePath, content, "utf8");
+
+		const state = new FileAccessState();
+		const readTool = createToolStub((pi) => registerReadFile(pi, state));
+
+		const result = await readTool.execute(
+			"read-1",
+			{ file_path: filePath },
+			undefined,
+			undefined,
+			createContext(tempDir),
+		);
+		const text = getTextContent(result);
+
+		expect(text).toContain("Showing lines 1-250 of 300.");
+		expect(text).toContain("Use offset=251 to continue.");
+		expect(text).not.toContain("line 251");
+		expect(result.details).toMatchObject({
+			range: {
+				startLine: 1,
+				endLine: 250,
+				totalLines: 300,
+			},
+			nextOffset: 251,
+			truncated: true,
+		});
+	});
+
+	it("reads a later page when offset and limit are provided", async () => {
+		const tempDir = await createTempDir();
+		const filePath = path.join(tempDir, "paged.txt");
+		const content = Array.from({ length: 120 }, (_, index) => `row ${index + 1}`).join("\n");
+		await fs.writeFile(filePath, content, "utf8");
+
+		const state = new FileAccessState();
+		const readTool = createToolStub((pi) => registerReadFile(pi, state));
+
+		const result = await readTool.execute(
+			"read-1",
+			{ file_path: filePath, offset: 101, limit: 20 },
+			undefined,
+			undefined,
+			createContext(tempDir),
+		);
+		const text = getTextContent(result);
+
+		expect(text).toContain("Showing lines 101-120 of 120.");
+		expect(text).toContain("row 101");
+		expect(text).toContain("row 120");
+		expect(result.details).toMatchObject({
+			range: {
+				startLine: 101,
+				endLine: 120,
+				totalLines: 120,
+			},
+			nextOffset: undefined,
+			truncated: false,
+		});
+	});
+
+	it("caps very large line requests and reports the capped continuation point", async () => {
+		const tempDir = await createTempDir();
+		const filePath = path.join(tempDir, "capped.txt");
+		const content = Array.from({ length: 600 }, (_, index) => `entry ${index + 1}`).join("\n");
+		await fs.writeFile(filePath, content, "utf8");
+
+		const state = new FileAccessState();
+		const readTool = createToolStub((pi) => registerReadFile(pi, state));
+
+		const result = await readTool.execute(
+			"read-1",
+			{ file_path: filePath, limit: 999 },
+			undefined,
+			undefined,
+			createContext(tempDir),
+		);
+		const text = getTextContent(result);
+
+		expect(text).toContain("Showing lines 1-500 of 600.");
+		expect(text).toContain("Line limit applied: maximum 500 lines per call.");
+		expect(text).toContain("Use offset=501 to continue.");
+	});
+
+	it("truncates very long lines and reports the truncation", async () => {
+		const tempDir = await createTempDir();
+		const filePath = path.join(tempDir, "long-line.txt");
+		const longLine = "x".repeat(1_500);
+		await fs.writeFile(filePath, `${longLine}\nshort\n`, "utf8");
+
+		const state = new FileAccessState();
+		const readTool = createToolStub((pi) => registerReadFile(pi, state));
+
+		const result = await readTool.execute(
+			"read-1",
+			{ file_path: filePath },
+			undefined,
+			undefined,
+			createContext(tempDir),
+		);
+		const text = getTextContent(result);
+
+		expect(text).toContain("Line truncated at 1200 characters.");
+		expect(text).toContain("Long lines were truncated at 1200 characters.");
+		expect(text).toContain("short");
+		expect(text).not.toContain("x".repeat(1_350));
+	});
+
+	it("caps output size and advances by whole lines", async () => {
+		const tempDir = await createTempDir();
+		const filePath = path.join(tempDir, "char-capped.txt");
+		const content = Array.from({ length: 40 }, (_, index) => `${index + 1}: ${"y".repeat(1_000)}`).join("\n");
+		await fs.writeFile(filePath, content, "utf8");
+
+		const state = new FileAccessState();
+		const readTool = createToolStub((pi) => registerReadFile(pi, state));
+
+		const result = await readTool.execute(
+			"read-1",
+			{ file_path: filePath, limit: 40 },
+			undefined,
+			undefined,
+			createContext(tempDir),
+		);
+		const text = getTextContent(result);
+
+		expect(text).toContain("Output capped at 16384 characters.");
+		expect(result.details).toMatchObject({
+			nextOffset: 17,
+			truncated: true,
+		});
+		expect(text).toContain("Use offset=17 to continue.");
+		expect(text).not.toContain("40:");
+	});
+
 	it("requires read_file before overwriting an existing file", async () => {
 		const tempDir = await createTempDir();
 		const filePath = path.join(tempDir, "example.txt");

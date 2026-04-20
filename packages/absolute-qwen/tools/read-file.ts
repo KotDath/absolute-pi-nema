@@ -6,7 +6,10 @@ import { readFileWithEncoding } from "../lib/encoding.ts";
 import type { FileAccessState, FileTrackingDetails } from "../lib/file-access-state.ts";
 import { ensureAbsolutePath } from "../lib/path.ts";
 
-const DEFAULT_MAX_CHARS = 50_000;
+const DEFAULT_LIMIT_LINES = 250;
+const MAX_LIMIT_LINES = 500;
+const MAX_OUTPUT_CHARS = 16 * 1024;
+const MAX_LINE_CHARS = 1_200;
 
 const Params = Type.Object({
 	file_path: Type.String({
@@ -37,6 +40,7 @@ interface ReadFileDetails extends FileTrackingDetails {
 		endLine: number;
 		totalLines: number;
 	};
+	nextOffset?: number;
 	truncated: boolean;
 }
 
@@ -46,14 +50,40 @@ function throwIfAborted(signal: AbortSignal | undefined) {
 	}
 }
 
-function truncateText(text: string): { text: string; truncated: boolean } {
-	if (text.length <= DEFAULT_MAX_CHARS) {
-		return { text, truncated: false };
+function truncateLine(line: string): { text: string; truncated: boolean } {
+	if (line.length <= MAX_LINE_CHARS) {
+		return { text: line, truncated: false };
 	}
 	return {
-		text: `${text.slice(0, DEFAULT_MAX_CHARS)}\n\n[Output truncated at ${DEFAULT_MAX_CHARS} characters. Narrow the range with offset/limit to continue.]`,
+		text: `${line.slice(0, MAX_LINE_CHARS)} [Line truncated at ${MAX_LINE_CHARS} characters.]`,
 		truncated: true,
 	};
+}
+
+function formatFooter(options: {
+	totalLines: number;
+	endLine: number;
+	nextOffset?: number;
+	lineLimitApplied: boolean;
+	outputCharLimitApplied: boolean;
+	longLinesTruncated: boolean;
+}) {
+	const notes: string[] = [];
+	if (options.lineLimitApplied) {
+		notes.push(`Line limit applied: maximum ${MAX_LIMIT_LINES} lines per call.`);
+	}
+	if (options.outputCharLimitApplied) {
+		notes.push(`Output capped at ${MAX_OUTPUT_CHARS} characters.`);
+	}
+	if (options.longLinesTruncated) {
+		notes.push(`Long lines were truncated at ${MAX_LINE_CHARS} characters.`);
+	}
+	if (options.nextOffset !== undefined && options.endLine < options.totalLines) {
+		notes.push(
+			`${options.totalLines - options.endLine} more line(s) remain. Use offset=${options.nextOffset} to continue.`,
+		);
+	}
+	return notes.length > 0 ? `\n\n[${notes.join(" ")}]` : "";
 }
 
 function prepareArguments(args: unknown): Params {
@@ -77,11 +107,12 @@ export function registerReadFile(pi: ExtensionAPI, fileAccessState: FileAccessSt
 		name: "read_file",
 		label: "Read File",
 		description:
-			"Reads and returns the content of a specified file. If the file is large, the content will be truncated. The tool's response will clearly indicate if truncation has occurred and will provide details on how to read more of the file using the 'offset' and 'limit' parameters. Handles text files with specific line ranges.",
-		promptSnippet: "Read a file by absolute path, optionally with line offset/limit.",
+			"Reads a file by absolute path using bounded, line-oriented pagination. The response always reports which lines were shown and how to continue reading with offset/limit. Use grep_search first to find relevant regions in large files, then read_file for the local context you need.",
+		promptSnippet: "Read a file by absolute path with bounded line pagination.",
 		promptGuidelines: [
 			"Use read_file before edit or before overwriting an existing file with write_file.",
 			"Use read_file instead of shell commands such as cat, sed, or python for file reads.",
+			"Use grep_search first when locating symbols, errors, or exact strings in large files, then read_file around the relevant region.",
 		],
 		parameters: Params,
 		prepareArguments,
@@ -107,28 +138,54 @@ export function registerReadFile(pi: ExtensionAPI, fileAccessState: FileAccessSt
 				throw new Error(`Offset ${startLine} is beyond end of file (${totalLines} line(s) total).`);
 			}
 
-			const limit = params.limit === undefined ? totalLines - startIndex : Math.max(1, Math.trunc(params.limit));
-			const endIndex = Math.min(startIndex + limit, totalLines);
-			const selectedLines = lines.slice(startIndex, endIndex);
-			let text = selectedLines.join("\n");
-			let truncated = false;
+			const requestedLimit = params.limit === undefined ? DEFAULT_LIMIT_LINES : Math.max(1, Math.trunc(params.limit));
+			const lineLimit = Math.min(requestedLimit, MAX_LIMIT_LINES);
+			const requestedEndIndex = Math.min(startIndex + lineLimit, totalLines);
+			const selectedLines: string[] = [];
+			let endIndex = startIndex;
+			let currentChars = 0;
+			let outputCharLimitApplied = false;
+			let longLinesTruncated = false;
 
-			const prefix =
-				startIndex > 0 || endIndex < totalLines
-					? `Showing lines ${startIndex + 1}-${endIndex} of ${totalLines}.\n\n`
-					: "";
-			const truncatedResult = truncateText(text);
-			text = truncatedResult.text;
-			truncated = truncatedResult.truncated;
-
-			if (!truncated && endIndex < totalLines) {
-				text += `\n\n[${totalLines - endIndex} more line(s) remain. Use offset=${endIndex + 1} to continue.]`;
+			for (let index = startIndex; index < requestedEndIndex; index++) {
+				const truncatedLine = truncateLine(lines[index] ?? "");
+				longLinesTruncated ||= truncatedLine.truncated;
+				const separator = selectedLines.length === 0 ? "" : "\n";
+				const nextChunk = `${separator}${truncatedLine.text}`;
+				if (selectedLines.length > 0 && currentChars + nextChunk.length > MAX_OUTPUT_CHARS) {
+					outputCharLimitApplied = true;
+					break;
+				}
+				selectedLines.push(truncatedLine.text);
+				currentChars += nextChunk.length;
+				endIndex = index + 1;
 			}
+
+			if (selectedLines.length === 0) {
+				const truncatedLine = truncateLine(lines[startIndex] ?? "");
+				selectedLines.push(truncatedLine.text);
+				longLinesTruncated ||= truncatedLine.truncated;
+				endIndex = startIndex + 1;
+			}
+
+			const text = selectedLines.join("\n");
+			const nextOffset = endIndex < totalLines ? endIndex + 1 : undefined;
+			const lineLimitApplied = requestedLimit > MAX_LIMIT_LINES;
+			const truncated = lineLimitApplied || outputCharLimitApplied || longLinesTruncated || nextOffset !== undefined;
+			const header = `Showing lines ${startIndex + 1}-${endIndex} of ${totalLines}.`;
+			const footer = formatFooter({
+				totalLines,
+				endLine: endIndex,
+				nextOffset,
+				lineLimitApplied,
+				outputCharLimitApplied,
+				longLinesTruncated,
+			});
 
 			const version = fileAccessState.markRead(filePath);
 
 			return {
-				content: [{ type: "text", text: `${prefix}${text}`.trim() }],
+				content: [{ type: "text", text: `${header}\n\n${text}${footer}`.trim() }],
 				details: {
 					path: filePath,
 					encoding,
@@ -137,6 +194,7 @@ export function registerReadFile(pi: ExtensionAPI, fileAccessState: FileAccessSt
 						endLine: endIndex,
 						totalLines,
 					},
+					nextOffset,
 					truncated,
 					tracking: {
 						action: "read",

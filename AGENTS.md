@@ -53,6 +53,7 @@ pnpm bench:smoke
 
 - `bench/fixtures/` contains template workspaces copied to a temp directory per scenario.
 - `bench/scenarios/` contains JSON specs with prompts and assertions.
-- `scripts/run-bench.mjs` is the thin runner that launches `pi --mode json`, captures the trace, and verifies tool calls, final text, and file outputs.
+- `scripts/run-bench.mjs` is the thin runner that launches `pi --mode json`, captures the trace, verifies tool calls/final outputs, and records token usage metrics.
+- Bench prompts should stay close to realistic user requests. Fix broken expectations in scenarios, but do not strengthen prompts just to help the agent pass. If a scenario is flaky because of harness details, stabilize the harness instead of adding extra hints to the prompt.
 
 This layout is intentionally simple now, but it is meant to scale toward larger eval suites later.
