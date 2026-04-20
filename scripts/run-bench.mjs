@@ -126,6 +126,13 @@ function getTextContent(message) {
 		.join("\n");
 }
 
+function getToolResultText(result) {
+	return (result?.content ?? [])
+		.filter((item) => item.type === "text")
+		.map((item) => item.text ?? "")
+		.join("\n");
+}
+
 function collectToolCalls(messages) {
 	const calls = [];
 	for (const message of messages) {
@@ -284,6 +291,17 @@ async function assertScenario(scenario, fixtureRoot, trace) {
 		const errored = toolResults.some((result) => result.toolName === toolName && result.isError === true);
 		if (errored) {
 			throw new Error(`Tool ${toolName} must not fail, but an error result was found.`);
+		}
+	}
+
+	for (const assertion of checks.tool_result_text_includes ?? []) {
+		const matched = toolResults.some(
+			(result) => result.toolName === assertion.tool && getToolResultText(result).includes(assertion.text),
+		);
+		if (!matched) {
+			throw new Error(
+				`Expected tool ${assertion.tool} result to include ${JSON.stringify(assertion.text)}, but no matching result was found.`,
+			);
 		}
 	}
 

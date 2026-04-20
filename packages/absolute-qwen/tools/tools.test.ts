@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { readFileWithEncoding, writeFileWithEncoding } from "../lib/encoding.ts";
 import { FileAccessState } from "../lib/file-access-state.ts";
 import { registerEdit } from "./edit.ts";
+import { registerGrepSearch } from "./grep-search.ts";
 import { registerReadFile } from "./read-file.ts";
 import { registerWriteFile } from "./write-file.ts";
 
@@ -204,6 +205,91 @@ describe("absolute-qwen tool contracts", () => {
 		});
 		expect(text).toContain("Use offset=17 to continue.");
 		expect(text).not.toContain("40:");
+	});
+
+	it("supports grep_search on a single file target", async () => {
+		const tempDir = await createTempDir();
+		const filePath = path.join(tempDir, "single.ts");
+		await fs.writeFile(filePath, "// TODO: single target\nconst x = 1;\n", "utf8");
+
+		const grepTool = createToolStub((pi) => registerGrepSearch(pi));
+		const result = await grepTool.execute(
+			"grep-1",
+			{ pattern: "TODO", path: filePath },
+			undefined,
+			undefined,
+			createContext(tempDir),
+		);
+		const text = getTextContent(result);
+
+		expect(text).toContain(`Found 1 match for "TODO" in ${filePath}.`);
+		expect(text).toContain("File: single.ts");
+		expect(text).toContain("L1: // TODO: single target");
+		expect(result.details).toMatchObject({
+			searchPath: filePath,
+			totalMatches: 1,
+			shownMatches: 1,
+			totalFiles: 1,
+			shownFiles: 1,
+			truncated: false,
+		});
+	});
+
+	it("bounds grep_search output and asks the agent to refine broad searches", async () => {
+		const tempDir = await createTempDir();
+		await fs.writeFile(
+			path.join(tempDir, "alpha.txt"),
+			Array.from({ length: 6 }, (_, index) => `TODO alpha ${index + 1}`).join("\n"),
+			"utf8",
+		);
+		await fs.writeFile(
+			path.join(tempDir, "beta.txt"),
+			Array.from({ length: 3 }, (_, index) => `TODO beta ${index + 1}`).join("\n"),
+			"utf8",
+		);
+
+		const grepTool = createToolStub((pi) => registerGrepSearch(pi));
+		const result = await grepTool.execute(
+			"grep-1",
+			{ pattern: "TODO", path: tempDir },
+			undefined,
+			undefined,
+			createContext(tempDir),
+		);
+		const text = getTextContent(result);
+
+		expect(text).toContain("Showing 7 of 9 matches across 2 of 2 files.");
+		expect(text).toContain("Refine the pattern, path, or glob to continue.");
+		expect(text).toContain("File: alpha.txt");
+		expect(text).toContain("L4: TODO alpha 4");
+		expect(text).not.toContain("L5: TODO alpha 5");
+		expect(result.details).toMatchObject({
+			searchPath: tempDir,
+			totalMatches: 9,
+			shownMatches: 7,
+			totalFiles: 2,
+			shownFiles: 2,
+			truncated: true,
+		});
+	});
+
+	it("truncates long grep_search snippets", async () => {
+		const tempDir = await createTempDir();
+		const filePath = path.join(tempDir, "long.txt");
+		await fs.writeFile(filePath, `TODO ${"z".repeat(400)}\n`, "utf8");
+
+		const grepTool = createToolStub((pi) => registerGrepSearch(pi));
+		const result = await grepTool.execute(
+			"grep-1",
+			{ pattern: "TODO", path: filePath },
+			undefined,
+			undefined,
+			createContext(tempDir),
+		);
+		const text = getTextContent(result);
+
+		expect(text).toContain("snippet truncated at 240 characters");
+		expect(text).toContain("Some snippets were truncated at 240 characters.");
 	});
 
 	it("requires read_file before overwriting an existing file", async () => {

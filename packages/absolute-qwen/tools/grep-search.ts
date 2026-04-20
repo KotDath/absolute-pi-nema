@@ -1,4 +1,4 @@
-import { type ExecFileException, execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { AgentToolResult, AgentToolUpdateCallback } from "@mariozechner/pi-agent-core";
@@ -6,6 +6,11 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 import type { Static } from "@sinclair/typebox";
 import { Type } from "@sinclair/typebox";
 import { ensureAbsolutePath } from "../lib/path.ts";
+
+const MAX_TOTAL_MATCHES = 40;
+const MAX_FILES = 10;
+const MAX_MATCHES_PER_FILE = 4;
+const MAX_SNIPPET_CHARS = 240;
 
 const Params = Type.Object(
 	{
@@ -29,8 +34,11 @@ type Params = Static<typeof Params>;
 
 interface GrepSearchDetails {
 	searchPath: string;
-	matchCount: number;
-	limited: boolean;
+	totalMatches: number;
+	shownMatches: number;
+	totalFiles: number;
+	shownFiles: number;
+	truncated: boolean;
 }
 
 interface GrepMatch {
@@ -39,29 +47,76 @@ interface GrepMatch {
 	line: string;
 }
 
-function parseGrepOutput(output: string, basePath: string): GrepMatch[] {
-	const results: GrepMatch[] = [];
-
-	for (const line of output.split("\n")) {
-		if (!line.trim()) {
-			continue;
-		}
-
-		const match = line.match(/^(.*?):(\d+):(.*)$/);
-		if (!match) {
-			continue;
-		}
-
-		const [, rawFilePath, rawLineNumber, rawLine] = match;
-		const absolutePath = path.resolve(basePath, rawFilePath);
-		results.push({
-			filePath: path.relative(basePath, absolutePath) || path.basename(absolutePath),
-			lineNumber: Number(rawLineNumber),
-			line: rawLine,
-		});
+function parseGrepLine(line: string, basePath: string): GrepMatch | null {
+	if (!line.trim()) {
+		return null;
 	}
 
-	return results;
+	const match = line.match(/^(.*?):(\d+):(.*)$/);
+	if (!match) {
+		return null;
+	}
+
+	const [, rawFilePath, rawLineNumber, rawLine] = match;
+	const absolutePath = path.resolve(basePath, rawFilePath);
+	return {
+		filePath: path.relative(basePath, absolutePath) || path.basename(absolutePath),
+		lineNumber: Number(rawLineNumber),
+		line: rawLine,
+	};
+}
+
+function truncateSnippet(line: string) {
+	if (line.length <= MAX_SNIPPET_CHARS) {
+		return { text: line.trimEnd(), truncated: false };
+	}
+
+	return {
+		text: `${line.slice(0, MAX_SNIPPET_CHARS).trimEnd()} [snippet truncated at ${MAX_SNIPPET_CHARS} characters]`,
+		truncated: true,
+	};
+}
+
+function formatSummary(details: GrepSearchDetails, pattern: string, displayPath: string) {
+	const matchWord = details.totalMatches === 1 ? "match" : "matches";
+	const fileWord = details.totalFiles === 1 ? "file" : "files";
+	const shownSummary = details.truncated
+		? ` Showing ${details.shownMatches} of ${details.totalMatches} ${matchWord} across ${details.shownFiles} of ${details.totalFiles} ${fileWord}.`
+		: "";
+	return `Found ${details.totalMatches} ${matchWord} for ${JSON.stringify(pattern)} in ${displayPath}.${shownSummary}`;
+}
+
+function buildSections(matches: GrepMatch[]) {
+	const byFile = new Map<string, GrepMatch[]>();
+
+	for (const match of matches) {
+		const existing = byFile.get(match.filePath);
+		if (existing) {
+			existing.push(match);
+			continue;
+		}
+		byFile.set(match.filePath, [match]);
+	}
+
+	const sections: string[] = [];
+	let snippetsTruncated = false;
+	for (const [filePath, fileMatches] of byFile) {
+		sections.push(
+			[
+				`File: ${filePath}`,
+				...fileMatches.map((match) => {
+					const snippet = truncateSnippet(match.line);
+					snippetsTruncated ||= snippet.truncated;
+					return `L${match.lineNumber}: ${snippet.text}`;
+				}),
+			].join("\n"),
+		);
+	}
+
+	return {
+		text: sections.join("\n\n"),
+		snippetsTruncated,
+	};
 }
 
 function prepareSearchTarget(targetPath: string | undefined, cwd: string) {
@@ -98,10 +153,11 @@ export function registerGrepSearch(pi: ExtensionAPI) {
 		name: "grep_search",
 		label: "Grep Search",
 		description:
-			"A regex search tool for file contents. Supports file or directory targets and optional glob filtering. Use this instead of invoking grep or rg via the shell for content search tasks.",
-		promptSnippet: "Search file contents with regex, optional absolute path filter, and optional glob.",
+			"A bounded regex search tool for file contents. Supports file or directory targets and optional glob filtering. Results are summarized with capped matches, capped files, and shortened snippets so large searches stay navigable. Use this instead of invoking grep or rg via the shell for content search tasks.",
+		promptSnippet: "Search file contents with regex and bounded, summary-first results.",
 		promptGuidelines: [
 			"Use grep_search for regex search tasks instead of invoking grep, rg, or find via run_shell_command.",
+			"Use grep_search first to locate relevant files or lines, then read_file for nearby context.",
 		],
 		parameters: Params,
 		async execute(
@@ -119,7 +175,8 @@ export function registerGrepSearch(pi: ExtensionAPI) {
 			}
 
 			const { baseDir, searchTarget, displayPath } = await prepareSearchTarget(params.path, ctx.cwd);
-			const limit = params.limit === undefined ? undefined : Math.max(1, Math.trunc(params.limit));
+			const limit = params.limit === undefined ? MAX_TOTAL_MATCHES : Math.max(1, Math.trunc(params.limit));
+			const shownMatchCap = Math.min(limit, MAX_TOTAL_MATCHES);
 
 			return new Promise<AgentToolResult<GrepSearchDetails>>((resolve, reject) => {
 				const args = ["-r", "-n", "-H", "-E", "-I"];
@@ -127,71 +184,122 @@ export function registerGrepSearch(pi: ExtensionAPI) {
 					args.push(`--include=${params.glob}`);
 				}
 				args.push(params.pattern, searchTarget);
+				const child = spawn("grep", args, {
+					cwd: baseDir,
+					signal,
+					stdio: ["ignore", "pipe", "pipe"],
+				});
 
-				execFile(
-					"grep",
-					args,
-					{ cwd: baseDir, maxBuffer: 10 * 1024 * 1024, signal, encoding: "utf8" },
-					(error: ExecFileException | null, stdout: string, stderr: string) => {
-						const exitCode = typeof error?.code === "number" ? error.code : undefined;
-						if (error && exitCode !== 1) {
-							reject(new Error(stderr || error.message));
-							return;
-						}
+				let stdoutBuffer = "";
+				let stderr = "";
+				let totalMatches = 0;
+				const totalByFile = new Map<string, number>();
+				const shownMatches: GrepMatch[] = [];
 
-						const matches = parseGrepOutput(stdout, baseDir);
-						if (matches.length === 0) {
-							resolve({
-								content: [
-									{ type: "text", text: `No matches found for ${JSON.stringify(params.pattern)} in ${displayPath}.` },
-								],
-								details: {
-									searchPath: displayPath,
-									matchCount: 0,
-									limited: false,
-								},
-							});
-							return;
-						}
+				const handleLine = (line: string) => {
+					const match = parseGrepLine(line, baseDir);
+					if (!match) {
+						return;
+					}
 
-						const limitedMatches = limit && matches.length > limit ? matches.slice(0, limit) : matches;
-						const limited = limitedMatches.length !== matches.length;
-						const byFile = new Map<string, GrepMatch[]>();
+					totalMatches++;
+					const fileTotal = (totalByFile.get(match.filePath) ?? 0) + 1;
+					totalByFile.set(match.filePath, fileTotal);
 
-						for (const match of limitedMatches) {
-							const existing = byFile.get(match.filePath);
-							if (existing) {
-								existing.push(match);
-							} else {
-								byFile.set(match.filePath, [match]);
-							}
-						}
+					if (shownMatches.length >= shownMatchCap) {
+						return;
+					}
+					if (!totalByFile.has(match.filePath)) {
+						return;
+					}
 
-						const sections: string[] = [];
-						for (const [filePath, fileMatches] of byFile) {
-							sections.push(
-								[
-									`File: ${filePath}`,
-									...fileMatches.map((match) => `L${match.lineNumber}: ${match.line.trimEnd()}`),
-								].join("\n"),
-							);
-						}
+					const shownFiles = new Set(shownMatches.map((item) => item.filePath));
+					const fileAlreadyShown = shownFiles.has(match.filePath);
+					if (!fileAlreadyShown && shownFiles.size >= MAX_FILES) {
+						return;
+					}
 
-						let text = `Found ${matches.length} match(es) for ${JSON.stringify(params.pattern)} in ${displayPath}.\n\n${sections.join("\n\n")}`;
-						if (limited) {
-							text += `\n\n[Showing first ${limitedMatches.length} match(es). Refine the pattern or path to continue.]`;
-						}
+					const shownForFile = shownMatches.filter((item) => item.filePath === match.filePath).length;
+					if (shownForFile >= MAX_MATCHES_PER_FILE) {
+						return;
+					}
 
+					shownMatches.push(match);
+				};
+
+				child.stdout.on("data", (chunk: Buffer | string) => {
+					stdoutBuffer += chunk.toString();
+					let newlineIndex = stdoutBuffer.indexOf("\n");
+					while (newlineIndex !== -1) {
+						const line = stdoutBuffer.slice(0, newlineIndex);
+						stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
+						handleLine(line);
+						newlineIndex = stdoutBuffer.indexOf("\n");
+					}
+				});
+				child.stderr.on("data", (chunk: Buffer | string) => {
+					stderr += chunk.toString();
+				});
+				child.on("error", reject);
+				child.on("close", (code) => {
+					if (stdoutBuffer.trim()) {
+						handleLine(stdoutBuffer);
+					}
+
+					if (code !== 0 && code !== 1) {
+						reject(new Error(stderr || `grep exited with code ${code}`));
+						return;
+					}
+
+					if (totalMatches === 0) {
 						resolve({
-							content: [{ type: "text", text }],
+							content: [
+								{ type: "text", text: `No matches found for ${JSON.stringify(params.pattern)} in ${displayPath}.` },
+							],
 							details: {
 								searchPath: displayPath,
-								matchCount: matches.length,
-								limited,
+								totalMatches: 0,
+								shownMatches: 0,
+								totalFiles: 0,
+								shownFiles: 0,
+								truncated: false,
 							},
 						});
-					},
-				);
+						return;
+					}
+
+					const shownFiles = new Set(shownMatches.map((match) => match.filePath)).size;
+					const details: GrepSearchDetails = {
+						searchPath: displayPath,
+						totalMatches,
+						shownMatches: shownMatches.length,
+						totalFiles: totalByFile.size,
+						shownFiles,
+						truncated: shownMatches.length < totalMatches || shownFiles < totalByFile.size,
+					};
+					const sections = buildSections(shownMatches);
+					let text = formatSummary(details, params.pattern, displayPath);
+
+					if (sections.text) {
+						text += `\n\n${sections.text}`;
+					}
+
+					const notes: string[] = [];
+					if (details.truncated) {
+						notes.push("Refine the pattern, path, or glob to continue.");
+					}
+					if (sections.snippetsTruncated) {
+						notes.push(`Some snippets were truncated at ${MAX_SNIPPET_CHARS} characters.`);
+					}
+					if (notes.length > 0) {
+						text += `\n\n[${notes.join(" ")}]`;
+					}
+
+					resolve({
+						content: [{ type: "text", text }],
+						details,
+					});
+				});
 			});
 		},
 	});
