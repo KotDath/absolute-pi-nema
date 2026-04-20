@@ -4,7 +4,7 @@ import type { AgentToolResult, AgentToolUpdateCallback } from "@mariozechner/pi-
 import { type ExtensionAPI, type ExtensionContext, withFileMutationQueue } from "@mariozechner/pi-coding-agent";
 import type { Static } from "@sinclair/typebox";
 import { Type } from "@sinclair/typebox";
-import { createUnifiedDiff } from "../lib/diff.ts";
+import { createUnifiedDiff, summarizeDiff } from "../lib/diff.ts";
 import { preserveLineEnding, readFileWithEncoding, writeFileWithEncoding } from "../lib/encoding.ts";
 import type { FileAccessState, FileTrackingDetails } from "../lib/file-access-state.ts";
 import { ensureAbsolutePath } from "../lib/path.ts";
@@ -22,13 +22,38 @@ type Params = Static<typeof Params>;
 interface WriteFileDetails extends FileTrackingDetails {
 	path: string;
 	overwritten: boolean;
-	diff?: string;
+	lineCount: number;
+	diffPreview?: string;
+	fullDiffPath?: string;
+	diffTruncated: boolean;
+	firstChangedLine?: number;
 }
 
 function throwIfAborted(signal: AbortSignal | undefined) {
 	if (signal?.aborted) {
 		throw new Error("Operation aborted");
 	}
+}
+
+function countLines(content: string) {
+	if (content.length === 0) {
+		return 0;
+	}
+	return content.split(/\r?\n/).length - (content.endsWith("\n") ? 1 : 0);
+}
+
+function findFirstChangedLine(previousContent: string, nextContent: string) {
+	const previousLines = previousContent.split(/\r?\n/);
+	const nextLines = nextContent.split(/\r?\n/);
+	const maxLines = Math.max(previousLines.length, nextLines.length);
+
+	for (let index = 0; index < maxLines; index++) {
+		if (previousLines[index] !== nextLines[index]) {
+			return index + 1;
+		}
+	}
+
+	return undefined;
 }
 
 function prepareArguments(args: unknown): Params {
@@ -103,15 +128,28 @@ export function registerWriteFile(pi: ExtensionAPI, fileAccessState: FileAccessS
 				throwIfAborted(signal);
 
 				const diff = createUnifiedDiff(existingContent, nextContent, filePath);
+				const diffSummary = overwritten
+					? summarizeDiff(diff)
+					: { preview: "", truncated: false, fullDiffPath: undefined };
 				const version = fileAccessState.markMutation(filePath);
 				const summary = overwritten ? `Overwrote ${filePath}` : `Created ${filePath}`;
+				const lineCount = countLines(nextContent);
+				const firstChangedLine = overwritten ? findFirstChangedLine(existingContent, nextContent) : 1;
+				const textParts = [`${summary} | ${lineCount} line(s)`];
+				if (diffSummary.preview) {
+					textParts.push(diffSummary.preview);
+				}
 
 				return {
-					content: [{ type: "text", text: diff ? `${summary}\n\n${diff}` : summary }],
+					content: [{ type: "text", text: textParts.join("\n\n") }],
 					details: {
 						path: filePath,
 						overwritten,
-						diff: diff || undefined,
+						lineCount,
+						diffPreview: diffSummary.preview || undefined,
+						fullDiffPath: diffSummary.fullDiffPath,
+						diffTruncated: diffSummary.truncated,
+						firstChangedLine: overwritten ? firstChangedLine : 1,
 						tracking: {
 							action: "write",
 							path: filePath,

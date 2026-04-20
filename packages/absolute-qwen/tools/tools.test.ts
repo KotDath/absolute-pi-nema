@@ -441,6 +441,113 @@ describe("absolute-qwen tool contracts", () => {
 		).rejects.toThrow(/bad[\s\S]*Exit code: 7/);
 	});
 
+	it("returns summary-only output when write_file creates a new file", async () => {
+		const tempDir = await createTempDir();
+		const filePath = path.join(tempDir, "new-file.txt");
+
+		const state = new FileAccessState();
+		const writeTool = createToolStub((pi) => registerWriteFile(pi, state));
+
+		const result = await writeTool.execute(
+			"write-1",
+			{ file_path: filePath, content: "created\n" },
+			undefined,
+			undefined,
+			createContext(tempDir),
+		);
+		const text = getTextContent(result);
+		const details = result.details as {
+			overwritten: boolean;
+			diffPreview?: string;
+			diffTruncated: boolean;
+			lineCount: number;
+		};
+
+		expect(text).toContain("Created");
+		expect(text).not.toContain("---");
+		expect(details.overwritten).toBe(false);
+		expect(details.diffPreview).toBeUndefined();
+		expect(details.diffTruncated).toBe(false);
+		expect(details.lineCount).toBe(1);
+	});
+
+	it("returns an inline diff preview for small write_file overwrites", async () => {
+		const tempDir = await createTempDir();
+		const filePath = path.join(tempDir, "overwrite.txt");
+		await fs.writeFile(filePath, "alpha\nbeta\n", "utf8");
+
+		const state = new FileAccessState();
+		const readTool = createToolStub((pi) => registerReadFile(pi, state));
+		const writeTool = createToolStub((pi) => registerWriteFile(pi, state));
+
+		await readTool.execute("read-1", { file_path: filePath }, undefined, undefined, createContext(tempDir));
+		const result = await writeTool.execute(
+			"write-1",
+			{ file_path: filePath, content: "gamma\nbeta\n" },
+			undefined,
+			undefined,
+			createContext(tempDir),
+		);
+		const text = getTextContent(result);
+		const details = result.details as {
+			diffPreview?: string;
+			fullDiffPath?: string;
+			diffTruncated: boolean;
+			firstChangedLine?: number;
+		};
+
+		expect(text).toContain("+gamma");
+		expect(details.diffPreview).toContain("+gamma");
+		expect(details.diffTruncated).toBe(false);
+		expect(details.fullDiffPath).toBeUndefined();
+		expect(details.firstChangedLine).toBe(1);
+	});
+
+	it("writes a full diff artifact for large write_file overwrites", async () => {
+		const tempDir = await createTempDir();
+		const filePath = path.join(tempDir, "large-write.txt");
+		const beforeSuffix = "C".repeat(80);
+		const afterSuffix = "D".repeat(80);
+		await fs.writeFile(
+			filePath,
+			Array.from({ length: 150 }, (_, index) => `before write ${index + 1} ${beforeSuffix}`).join("\n"),
+			"utf8",
+		);
+
+		const state = new FileAccessState();
+		const readTool = createToolStub((pi) => registerReadFile(pi, state));
+		const writeTool = createToolStub((pi) => registerWriteFile(pi, state));
+
+		await readTool.execute("read-1", { file_path: filePath }, undefined, undefined, createContext(tempDir));
+		const result = await writeTool.execute(
+			"write-1",
+			{
+				file_path: filePath,
+				content: Array.from({ length: 150 }, (_, index) => `after write ${index + 1} ${afterSuffix}`).join("\n"),
+			},
+			undefined,
+			undefined,
+			createContext(tempDir),
+		);
+		const text = getTextContent(result);
+		const details = result.details as {
+			diffPreview?: string;
+			fullDiffPath?: string;
+			diffTruncated: boolean;
+		};
+
+		expect(text).toContain("Diff preview truncated.");
+		expect(details.diffTruncated).toBe(true);
+		expect(details.fullDiffPath).toBeTruthy();
+		const fullDiffPath = details.fullDiffPath;
+		if (!fullDiffPath) {
+			throw new Error("Expected fullDiffPath to be defined.");
+		}
+		const diff = await fs.readFile(fullDiffPath, "utf8");
+		expect(diff).toContain("after write 150");
+		expect(diff).toContain("before write 1");
+	});
+
 	it("requires read_file before overwriting an existing file", async () => {
 		const tempDir = await createTempDir();
 		const filePath = path.join(tempDir, "example.txt");
