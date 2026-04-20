@@ -152,6 +152,13 @@ function collectToolResults(messages) {
 	return messages.filter((message) => message.role === "toolResult");
 }
 
+function collectStreamedToolNames(trace) {
+	return trace
+		.filter((event) => event.type === "tool_execution_update")
+		.map((event) => event.toolName)
+		.filter(Boolean);
+}
+
 function collectUsage(messages) {
 	const usage = createEmptyUsage();
 	const assistantMessages = messages.filter((message) => message.role === "assistant");
@@ -265,6 +272,7 @@ async function assertScenario(scenario, fixtureRoot, trace) {
 
 	const toolCalls = collectToolCalls(messages);
 	const toolResults = collectToolResults(messages);
+	const streamedTools = collectStreamedToolNames(trace);
 	const finalText = getTextContent(finalAssistant);
 	const checks = scenario.checks ?? {};
 
@@ -277,6 +285,12 @@ async function assertScenario(scenario, fixtureRoot, trace) {
 	for (const toolName of checks.must_not_use_tools ?? []) {
 		if (toolCalls.includes(toolName)) {
 			throw new Error(`Tool ${toolName} must not be used, but got [${toolCalls.join(", ")}].`);
+		}
+	}
+
+	for (const toolName of checks.must_stream_tools ?? []) {
+		if (!streamedTools.includes(toolName)) {
+			throw new Error(`Expected tool ${toolName} to stream updates, but no tool_execution_update was found.`);
 		}
 	}
 

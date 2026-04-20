@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { AgentToolResult } from "@mariozechner/pi-agent-core";
+import type { AgentToolResult, AgentToolUpdateCallback } from "@mariozechner/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 import { readFileWithEncoding, writeFileWithEncoding } from "../lib/encoding.ts";
@@ -9,6 +9,7 @@ import { FileAccessState } from "../lib/file-access-state.ts";
 import { registerEdit } from "./edit.ts";
 import { registerGrepSearch } from "./grep-search.ts";
 import { registerReadFile } from "./read-file.ts";
+import { registerRunShell } from "./run-shell.ts";
 import { registerWriteFile } from "./write-file.ts";
 
 type RegisteredToolLike = {
@@ -17,7 +18,7 @@ type RegisteredToolLike = {
 		toolCallId: string,
 		params: Record<string, unknown>,
 		signal: AbortSignal | undefined,
-		onUpdate: undefined,
+		onUpdate: AgentToolUpdateCallback<unknown> | undefined,
 		ctx: ExtensionContext,
 	) => Promise<AgentToolResult<unknown>>;
 };
@@ -290,6 +291,78 @@ describe("absolute-qwen tool contracts", () => {
 
 		expect(text).toContain("snippet truncated at 240 characters");
 		expect(text).toContain("Some snippets were truncated at 240 characters.");
+	});
+
+	it("returns small run_shell_command output directly", async () => {
+		const tempDir = await createTempDir();
+		const shellTool = createToolStub((pi) => registerRunShell(pi));
+
+		const result = await shellTool.execute(
+			"shell-1",
+			{ command: "printf 'hello\\nworld\\n'", is_background: false },
+			undefined,
+			undefined,
+			createContext(tempDir),
+		);
+		const text = getTextContent(result);
+
+		expect(text).toContain("hello");
+		expect(text).toContain("world");
+		expect(result.details).toMatchObject({
+			cwd: tempDir,
+			background: false,
+			truncated: false,
+		});
+	});
+
+	it("streams long run_shell_command output and saves the full log", async () => {
+		const tempDir = await createTempDir();
+		const shellTool = createToolStub((pi) => registerRunShell(pi));
+		const updates: AgentToolResult<unknown>[] = [];
+
+		const result = await shellTool.execute(
+			"shell-1",
+			{
+				command: "for i in $(seq 1 120); do echo line-$i; done",
+				is_background: false,
+			},
+			undefined,
+			(update) => updates.push(update),
+			createContext(tempDir),
+		);
+		const text = getTextContent(result);
+		const details = result.details as {
+			fullOutputPath?: string;
+			truncated?: boolean;
+		};
+
+		expect(updates.length).toBeGreaterThan(0);
+		expect(text).toContain("Full output:");
+		expect(text).toContain("Command completed successfully.");
+		expect(details.truncated).toBe(true);
+		expect(details.fullOutputPath).toBeTruthy();
+		const fullOutputPath = details.fullOutputPath;
+		if (!fullOutputPath) {
+			throw new Error("Expected fullOutputPath to be defined.");
+		}
+		const log = await fs.readFile(fullOutputPath, "utf8");
+		expect(log).toContain("line-1");
+		expect(log).toContain("line-120");
+	});
+
+	it("includes buffered output in run_shell_command errors", async () => {
+		const tempDir = await createTempDir();
+		const shellTool = createToolStub((pi) => registerRunShell(pi));
+
+		await expect(
+			shellTool.execute(
+				"shell-1",
+				{ command: "printf 'bad\\n'; exit 7", is_background: false },
+				undefined,
+				undefined,
+				createContext(tempDir),
+			),
+		).rejects.toThrow(/bad[\s\S]*Exit code: 7/);
 	});
 
 	it("requires read_file before overwriting an existing file", async () => {
