@@ -9,13 +9,15 @@
 	},
 	"files": ["*.ts", "tools/**/*.ts", "lib/**/*.ts", "README.md", "!**/*.test.ts"],
 	"scripts": {
+		"build": "tsc --project ./tsconfig.json --noEmit",
+		"test": "vitest run",
 		"typecheck": "tsc --project ./tsconfig.json --noEmit"
 	},
 	"peerDependencies": {
-		"@mariozechner/pi-agent-core": ">=0.56.1",
-		"@mariozechner/pi-ai": ">=0.56.1",
-		"@mariozechner/pi-coding-agent": ">=0.56.1",
-		"@mariozechner/pi-tui": ">=0.56.1",
+		"@mariozechner/pi-agent-core": ">=0.67.0",
+		"@mariozechner/pi-ai": ">=0.67.0",
+		"@mariozechner/pi-coding-agent": ">=0.67.0",
+		"@mariozechner/pi-tui": ">=0.67.0",
 		"@sinclair/typebox": "*"
 	},
 	"dependencies": {

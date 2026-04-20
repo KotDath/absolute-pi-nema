@@ -1,9 +1,9 @@
-import path from "node:path";
 import type { AgentToolResult, AgentToolUpdateCallback } from "@mariozechner/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import type { Static } from "@sinclair/typebox";
 import { Type } from "@sinclair/typebox";
 import { glob } from "glob";
+import { ensureAbsolutePath } from "../lib/path.ts";
 
 const MAX_FILES = 100;
 
@@ -23,12 +23,12 @@ export function registerGlob(pi: ExtensionAPI) {
 		name: "glob",
 		label: "Glob",
 		description:
-			"Fast file pattern matching tool that works with any codebase size\n" +
+			"Fast file pattern matching tool for discovering files by name pattern.\n" +
 			'- Supports glob patterns like "**/*.js" or "src/**/*.ts"\n' +
-			"- Returns matching file paths sorted by modification time\n" +
-			"- Use this tool when you need to find files by name patterns\n" +
-			"- You have the capability to call multiple tools in a single response. It is always better to speculatively perform multiple searches as a batch that are potentially useful.",
-		promptSnippet: "Find files by glob pattern, optionally under a specific directory.",
+			"- Returns absolute matching file paths sorted by modification time\n" +
+			"- Use this tool when you need to find files by name patterns",
+		promptSnippet: "Find files by glob pattern, optionally under a specific absolute directory.",
+		promptGuidelines: ["Use glob instead of shell find when you need files by name or path pattern."],
 		parameters: Params,
 		async execute(
 			_toolCallId: string,
@@ -37,7 +37,7 @@ export function registerGlob(pi: ExtensionAPI) {
 			_onUpdate: AgentToolUpdateCallback<unknown> | undefined,
 			ctx: ExtensionContext,
 		): Promise<AgentToolResult<unknown>> {
-			const searchDir = params.path ? path.resolve(params.path) : ctx.cwd;
+			const searchDir = params.path ? ensureAbsolutePath(params.path, "Glob path") : ctx.cwd;
 
 			try {
 				const entries = await glob(params.pattern, {
@@ -89,10 +89,10 @@ export function registerGlob(pi: ExtensionAPI) {
 					text += `\n---\n[${total - MAX_FILES} files truncated] ...`;
 				}
 
-				return { content: [{ type: "text", text }], details: {} };
+				return { content: [{ type: "text", text }], details: { searchDir, total, truncated } };
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
-				return { content: [{ type: "text", text: `Error during glob search: ${message}` }], details: {} };
+				throw new Error(`Glob search failed: ${message}`);
 			}
 		},
 	});
