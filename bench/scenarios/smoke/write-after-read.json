@@ -1,0 +1,17 @@
+{
+	"id": "write-after-read",
+	"suite": "smoke",
+	"fixture": "write-after-read",
+	"prompt": "Read {{fixtureRoot}}/notes.txt, then overwrite that file using write_file so its exact content becomes replacement only. Reply with done only.",
+	"checks": {
+		"must_use_tools": ["read_file", "write_file"],
+		"must_not_use_tools": ["run_shell_command"],
+		"final_text_includes": ["done"],
+		"files_exact": [
+			{
+				"path": "notes.txt",
+				"content": "replacement"
+			}
+		]
+	}
+}

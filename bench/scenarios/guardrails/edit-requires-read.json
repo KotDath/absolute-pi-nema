@@ -1,0 +1,12 @@
+{
+	"id": "edit-requires-read",
+	"suite": "guardrails",
+	"fixture": "requires-read",
+	"prompt": "Do not use read_file. Attempt to edit {{fixtureRoot}}/guard.txt directly with edit by replacing alpha with beta, then report the tool error briefly.",
+	"checks": {
+		"must_use_tools": ["edit"],
+		"must_not_use_tools": ["read_file"],
+		"must_error_tools": ["edit"],
+		"final_text_includes": ["read_file", "edit"]
+	}
+}
