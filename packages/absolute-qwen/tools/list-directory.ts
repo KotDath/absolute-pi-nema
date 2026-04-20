@@ -17,6 +17,13 @@ const Params = Type.Object(
 
 type Params = Static<typeof Params>;
 
+interface ListDirectoryDetails {
+	path: string;
+	total: number;
+	shown: number;
+	truncated: boolean;
+}
+
 function matchesGlob(filename: string, patterns: string[]): boolean {
 	for (const pattern of patterns) {
 		const regexStr = pattern
@@ -55,7 +62,7 @@ export function registerListDirectory(pi: ExtensionAPI) {
 			_signal: AbortSignal | undefined,
 			_onUpdate: AgentToolUpdateCallback<unknown> | undefined,
 			_ctx: ExtensionContext,
-		): Promise<AgentToolResult<{ path: string; total: number; truncated: boolean }>> {
+		): Promise<AgentToolResult<ListDirectoryDetails>> {
 			const dirPath = ensureAbsolutePath(params.path, "Directory path");
 			const stat = await fs.stat(dirPath);
 			if (!stat.isDirectory()) {
@@ -82,6 +89,7 @@ export function registerListDirectory(pi: ExtensionAPI) {
 					details: {
 						path: dirPath,
 						total: 0,
+						shown: 0,
 						truncated: false,
 					},
 				};
@@ -89,10 +97,11 @@ export function registerListDirectory(pi: ExtensionAPI) {
 
 			const truncated = filtered.length > MAX_ENTRIES;
 			const visible = truncated ? filtered.slice(0, MAX_ENTRIES) : filtered;
+			const shown = visible.length;
 			const listing = visible.map((entry) => `${entry.isDir ? "[DIR] " : ""}${entry.name}`).join("\n");
-			let text = `Listed ${filtered.length} item(s) in ${dirPath}:\n\n${listing}`;
+			let text = `Listed ${filtered.length} item(s) in ${dirPath}. Showing ${shown} of ${filtered.length}.\n\n${listing}`;
 			if (truncated) {
-				text += `\n\n[${filtered.length - visible.length} more item(s) omitted. Narrow the path or ignore patterns to continue.]`;
+				text += `\n\n[Showing ${shown} of ${filtered.length} entries. Narrow the path or ignore patterns to continue.]`;
 			}
 
 			return {
@@ -100,6 +109,7 @@ export function registerListDirectory(pi: ExtensionAPI) {
 				details: {
 					path: dirPath,
 					total: filtered.length,
+					shown,
 					truncated,
 				},
 			};

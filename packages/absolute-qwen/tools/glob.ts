@@ -18,6 +18,13 @@ const Params = Type.Object({
 
 type Params = Static<typeof Params>;
 
+interface GlobDetails {
+	searchDir: string;
+	total: number;
+	shown: number;
+	truncated: boolean;
+}
+
 export function registerGlob(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "glob",
@@ -36,7 +43,7 @@ export function registerGlob(pi: ExtensionAPI) {
 			signal: AbortSignal | undefined,
 			_onUpdate: AgentToolUpdateCallback<unknown> | undefined,
 			ctx: ExtensionContext,
-		): Promise<AgentToolResult<unknown>> {
+		): Promise<AgentToolResult<GlobDetails>> {
 			const searchDir = params.path ? ensureAbsolutePath(params.path, "Glob path") : ctx.cwd;
 
 			try {
@@ -53,7 +60,12 @@ export function registerGlob(pi: ExtensionAPI) {
 				if (entries.length === 0) {
 					return {
 						content: [{ type: "text", text: `No files found matching pattern "${params.pattern}" in ${searchDir}` }],
-						details: {},
+						details: {
+							searchDir,
+							total: 0,
+							shown: 0,
+							truncated: false,
+						},
 					};
 				}
 
@@ -81,15 +93,19 @@ export function registerGlob(pi: ExtensionAPI) {
 				const total = entries.length;
 				const truncated = total > MAX_FILES;
 				const shown = truncated ? entries.slice(0, MAX_FILES) : entries;
+				const shownCount = shown.length;
 
 				const fileList = shown.map((e) => String(e)).join("\n");
-				let text = `Found ${total} file(s) matching "${params.pattern}" in ${searchDir}, sorted by modification time (newest first):\n---\n${fileList}`;
+				let text = `Found ${total} file(s) matching "${params.pattern}" in ${searchDir}. Showing ${shownCount} of ${total}, sorted by modification time (newest first).\n\n${fileList}`;
 
 				if (truncated) {
-					text += `\n---\n[${total - MAX_FILES} files truncated] ...`;
+					text += `\n\n[Showing ${shownCount} of ${total} matches. Narrow the pattern or path to continue.]`;
 				}
 
-				return { content: [{ type: "text", text }], details: { searchDir, total, truncated } };
+				return {
+					content: [{ type: "text", text }],
+					details: { searchDir, total, shown: shownCount, truncated },
+				};
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
 				throw new Error(`Glob search failed: ${message}`);

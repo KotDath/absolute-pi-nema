@@ -7,7 +7,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { readFileWithEncoding, writeFileWithEncoding } from "../lib/encoding.ts";
 import { FileAccessState } from "../lib/file-access-state.ts";
 import { registerEdit } from "./edit.ts";
+import { registerGlob } from "./glob.ts";
 import { registerGrepSearch } from "./grep-search.ts";
+import { registerListDirectory } from "./list-directory.ts";
 import { registerReadFile } from "./read-file.ts";
 import { registerRunShell } from "./run-shell.ts";
 import { registerWriteFile } from "./write-file.ts";
@@ -291,6 +293,52 @@ describe("absolute-qwen tool contracts", () => {
 
 		expect(text).toContain("snippet truncated at 240 characters");
 		expect(text).toContain("Some snippets were truncated at 240 characters.");
+	});
+
+	it("reports shown versus total results for glob truncation", async () => {
+		const tempDir = await createTempDir();
+		for (let index = 1; index <= 110; index++) {
+			await fs.writeFile(path.join(tempDir, `file-${index}.txt`), `${index}\n`, "utf8");
+		}
+
+		const globTool = createToolStub((pi) => registerGlob(pi));
+		const result = await globTool.execute(
+			"glob-1",
+			{ pattern: "*.txt", path: tempDir },
+			undefined,
+			undefined,
+			createContext(tempDir),
+		);
+		const text = getTextContent(result);
+
+		expect(text).toContain("Showing 100 of 110");
+		expect(text).toContain("Narrow the pattern or path to continue.");
+		expect(result.details).toMatchObject({
+			searchDir: tempDir,
+			total: 110,
+			shown: 100,
+			truncated: true,
+		});
+	});
+
+	it("reports shown versus total results for list_directory truncation", async () => {
+		const tempDir = await createTempDir();
+		for (let index = 1; index <= 105; index++) {
+			await fs.writeFile(path.join(tempDir, `entry-${index}.txt`), `${index}\n`, "utf8");
+		}
+
+		const listTool = createToolStub((pi) => registerListDirectory(pi));
+		const result = await listTool.execute("list-1", { path: tempDir }, undefined, undefined, createContext(tempDir));
+		const text = getTextContent(result);
+
+		expect(text).toContain("Showing 100 of 105.");
+		expect(text).toContain("Narrow the path or ignore patterns to continue.");
+		expect(result.details).toMatchObject({
+			path: tempDir,
+			total: 105,
+			shown: 100,
+			truncated: true,
+		});
 	});
 
 	it("returns an inline diff preview for small edits", async () => {
