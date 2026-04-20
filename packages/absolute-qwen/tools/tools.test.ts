@@ -293,6 +293,82 @@ describe("absolute-qwen tool contracts", () => {
 		expect(text).toContain("Some snippets were truncated at 240 characters.");
 	});
 
+	it("returns an inline diff preview for small edits", async () => {
+		const tempDir = await createTempDir();
+		const filePath = path.join(tempDir, "small-edit.txt");
+		await fs.writeFile(filePath, "hello\nworld\n", "utf8");
+
+		const state = new FileAccessState();
+		const readTool = createToolStub((pi) => registerReadFile(pi, state));
+		const editTool = createToolStub((pi) => registerEdit(pi, state));
+
+		await readTool.execute("read-1", { file_path: filePath }, undefined, undefined, createContext(tempDir));
+		const result = await editTool.execute(
+			"edit-1",
+			{ file_path: filePath, old_string: "hello", new_string: "hi" },
+			undefined,
+			undefined,
+			createContext(tempDir),
+		);
+		const text = getTextContent(result);
+		const details = result.details as {
+			diffPreview?: string;
+			fullDiffPath?: string;
+			diffTruncated: boolean;
+		};
+
+		expect(text).toContain("Edited");
+		expect(text).toContain("+hi");
+		expect(details.diffPreview).toContain("+hi");
+		expect(details.diffTruncated).toBe(false);
+		expect(details.fullDiffPath).toBeUndefined();
+	});
+
+	it("writes a full diff artifact when an edit diff is too large for inline preview", async () => {
+		const tempDir = await createTempDir();
+		const filePath = path.join(tempDir, "large-edit.txt");
+		const beforeSuffix = "A".repeat(80);
+		const afterSuffix = "B".repeat(80);
+		await fs.writeFile(
+			filePath,
+			Array.from({ length: 200 }, (_, index) => `before line ${index + 1} ${beforeSuffix}`).join("\n"),
+			"utf8",
+		);
+
+		const state = new FileAccessState();
+		const readTool = createToolStub((pi) => registerReadFile(pi, state));
+		const editTool = createToolStub((pi) => registerEdit(pi, state));
+
+		const oldBlock = Array.from({ length: 120 }, (_, index) => `before line ${index + 1} ${beforeSuffix}`).join("\n");
+		const newBlock = Array.from({ length: 120 }, (_, index) => `after line ${index + 1} ${afterSuffix}`).join("\n");
+
+		await readTool.execute("read-1", { file_path: filePath }, undefined, undefined, createContext(tempDir));
+		const result = await editTool.execute(
+			"edit-1",
+			{ file_path: filePath, old_string: oldBlock, new_string: newBlock },
+			undefined,
+			undefined,
+			createContext(tempDir),
+		);
+		const text = getTextContent(result);
+		const details = result.details as {
+			diffPreview?: string;
+			fullDiffPath?: string;
+			diffTruncated: boolean;
+		};
+
+		expect(text).toContain("Diff preview truncated.");
+		expect(details.diffTruncated).toBe(true);
+		expect(details.fullDiffPath).toBeTruthy();
+		const fullDiffPath = details.fullDiffPath;
+		if (!fullDiffPath) {
+			throw new Error("Expected fullDiffPath to be defined.");
+		}
+		const diff = await fs.readFile(fullDiffPath, "utf8");
+		expect(diff).toContain("after line 120");
+		expect(diff).toContain("before line 1");
+	});
+
 	it("returns small run_shell_command output directly", async () => {
 		const tempDir = await createTempDir();
 		const shellTool = createToolStub((pi) => registerRunShell(pi));

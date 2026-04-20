@@ -1,3 +1,9 @@
+import { mkdtempSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+const MAX_DIFF_PREVIEW_CHARS = 4_000;
+
 export function createUnifiedDiff(oldContent: string, newContent: string, filePath: string): string {
 	const oldLines = oldContent.split("\n");
 	const newLines = newContent.split("\n");
@@ -27,4 +33,31 @@ export function createUnifiedDiff(oldContent: string, newContent: string, filePa
 	}
 
 	return `--- ${filePath}\n+++ ${filePath}\n@@ ... @@\n${changes.join("\n")}\n(${removed} removed, ${added} added)`;
+}
+
+export function summarizeDiff(diff: string) {
+	if (!diff) {
+		return {
+			preview: "",
+			truncated: false,
+			fullDiffPath: undefined,
+		};
+	}
+
+	if (diff.length <= MAX_DIFF_PREVIEW_CHARS) {
+		return {
+			preview: diff,
+			truncated: false,
+			fullDiffPath: undefined,
+		};
+	}
+
+	const dir = mkdtempSync(path.join(os.tmpdir(), "apb-diff-"));
+	const fullDiffPath = path.join(dir, "edit.diff");
+	writeFileSync(fullDiffPath, diff, "utf8");
+	return {
+		preview: `${diff.slice(0, MAX_DIFF_PREVIEW_CHARS)}\n\n[Diff preview truncated. Full diff: ${fullDiffPath}]`,
+		truncated: true,
+		fullDiffPath,
+	};
 }

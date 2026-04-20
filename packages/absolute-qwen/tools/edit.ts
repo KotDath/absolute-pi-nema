@@ -4,7 +4,7 @@ import { type ExtensionAPI, type ExtensionContext, withFileMutationQueue } from 
 import { Container, Text } from "@mariozechner/pi-tui";
 import type { Static } from "@sinclair/typebox";
 import { Type } from "@sinclair/typebox";
-import { createUnifiedDiff } from "../lib/diff.ts";
+import { createUnifiedDiff, summarizeDiff } from "../lib/diff.ts";
 import { preserveLineEnding, readFileWithEncoding, writeFileWithEncoding } from "../lib/encoding.ts";
 import type { FileAccessState, FileTrackingDetails } from "../lib/file-access-state.ts";
 import { ensureAbsolutePath } from "../lib/path.ts";
@@ -31,7 +31,9 @@ type Params = Static<typeof Params>;
 
 interface EditDetails extends FileTrackingDetails {
 	path: string;
-	diff?: string;
+	diffPreview?: string;
+	fullDiffPath?: string;
+	diffTruncated: boolean;
 	firstChangedLine?: number;
 	replacedCount: number;
 }
@@ -211,19 +213,31 @@ export function registerEdit(pi: ExtensionAPI, fileAccessState: FileAccessState)
 				throwIfAborted(signal);
 
 				const diff = createUnifiedDiff(originalContent, nextContent, filePath);
+				const diffSummary = summarizeDiff(diff);
 				const version = fileAccessState.markMutation(filePath);
+				const summaryParts = [`Edited ${filePath}`, `${replacedCount} replacement(s)`];
+				const firstChangedLine = findFirstChangedLine(originalContent, nextContent);
+				if (firstChangedLine !== undefined) {
+					summaryParts.push(`first changed line ${firstChangedLine}`);
+				}
+				const textParts = [summaryParts.join(" | ")];
+				if (diffSummary.preview) {
+					textParts.push(diffSummary.preview);
+				}
 
 				return {
 					content: [
 						{
 							type: "text",
-							text: diff ? `Edited ${filePath}\n\n${diff}` : `Edited ${filePath}`,
+							text: textParts.join("\n\n"),
 						},
 					],
 					details: {
 						path: filePath,
-						diff: diff || undefined,
-						firstChangedLine: findFirstChangedLine(originalContent, nextContent),
+						diffPreview: diffSummary.preview || undefined,
+						fullDiffPath: diffSummary.fullDiffPath,
+						diffTruncated: diffSummary.truncated,
+						firstChangedLine,
 						replacedCount,
 						tracking: {
 							action: "edit",
@@ -241,7 +255,7 @@ export function registerEdit(pi: ExtensionAPI, fileAccessState: FileAccessState)
 		},
 		renderResult(result, _options, theme, context) {
 			const typedResult = result as AgentToolResult<EditDetails>;
-			const output = context.isError ? getTextContent(typedResult) : typedResult.details?.diff;
+			const output = context.isError ? getTextContent(typedResult) : typedResult.details?.diffPreview;
 			if (!output) {
 				const container = (context.lastComponent as Container | undefined) ?? new Container();
 				container.clear();
