@@ -419,7 +419,8 @@ describe("absolute-qwen tool contracts", () => {
 
 	it("returns small run_shell_command output directly", async () => {
 		const tempDir = await createTempDir();
-		const shellTool = createToolStub((pi) => registerRunShell(pi));
+		const state = new FileAccessState();
+		const shellTool = createToolStub((pi) => registerRunShell(pi, state));
 
 		const result = await shellTool.execute(
 			"shell-1",
@@ -441,7 +442,8 @@ describe("absolute-qwen tool contracts", () => {
 
 	it("streams long run_shell_command output and saves the full log", async () => {
 		const tempDir = await createTempDir();
-		const shellTool = createToolStub((pi) => registerRunShell(pi));
+		const state = new FileAccessState();
+		const shellTool = createToolStub((pi) => registerRunShell(pi, state));
 		const updates: AgentToolResult<unknown>[] = [];
 
 		const result = await shellTool.execute(
@@ -476,7 +478,8 @@ describe("absolute-qwen tool contracts", () => {
 
 	it("includes buffered output in run_shell_command errors", async () => {
 		const tempDir = await createTempDir();
-		const shellTool = createToolStub((pi) => registerRunShell(pi));
+		const state = new FileAccessState();
+		const shellTool = createToolStub((pi) => registerRunShell(pi, state));
 
 		await expect(
 			shellTool.execute(
@@ -487,6 +490,74 @@ describe("absolute-qwen tool contracts", () => {
 				createContext(tempDir),
 			),
 		).rejects.toThrow(/bad[\s\S]*Exit code: 7/);
+	});
+
+	it("invalidates read freshness after run_shell_command mutates a file", async () => {
+		const tempDir = await createTempDir();
+		const filePath = path.join(tempDir, "mutated.txt");
+		await fs.writeFile(filePath, "alpha\n", "utf8");
+
+		const state = new FileAccessState();
+		const readTool = createToolStub((pi) => registerReadFile(pi, state));
+		const shellTool = createToolStub((pi) => registerRunShell(pi, state));
+		const editTool = createToolStub((pi) => registerEdit(pi, state));
+
+		await readTool.execute("read-1", { file_path: filePath }, undefined, undefined, createContext(tempDir));
+		await shellTool.execute(
+			"shell-1",
+			{ command: `printf 'beta\\n' > ${JSON.stringify(filePath)}`, is_background: false },
+			undefined,
+			undefined,
+			createContext(tempDir),
+		);
+
+		await expect(
+			editTool.execute(
+				"edit-1",
+				{ file_path: filePath, old_string: "beta", new_string: "gamma" },
+				undefined,
+				undefined,
+				createContext(tempDir),
+			),
+		).rejects.toThrow(`Use read_file on ${filePath} before calling edit.`);
+	});
+
+	it("rebuilds file access state from legacy session entries without tracking metadata", async () => {
+		const tempDir = await createTempDir();
+		const filePath = path.join(tempDir, "legacy.txt");
+
+		const state = new FileAccessState();
+		state.rebuild([
+			{
+				type: "message",
+				message: {
+					role: "toolResult",
+					toolName: "read_file",
+					details: { path: filePath },
+				},
+			},
+		]);
+
+		expect(() => state.requireFreshRead(filePath, "edit")).not.toThrow();
+		state.rebuild([
+			{
+				type: "message",
+				message: {
+					role: "toolResult",
+					toolName: "read_file",
+					details: { path: filePath },
+				},
+			},
+			{
+				type: "message",
+				message: {
+					role: "toolResult",
+					toolName: "write_file",
+					details: { path: filePath },
+				},
+			},
+		]);
+		expect(() => state.requireFreshRead(filePath, "edit")).toThrow(`Use read_file on ${filePath} before calling edit.`);
 	});
 
 	it("returns summary-only output when write_file creates a new file", async () => {

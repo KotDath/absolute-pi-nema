@@ -30,12 +30,10 @@ export function registerGlob(pi: ExtensionAPI) {
 		name: "glob",
 		label: "Glob",
 		description:
-			"Fast file pattern matching tool for discovering files by name pattern.\n" +
-			'- Supports glob patterns like "**/*.js" or "src/**/*.ts"\n' +
-			"- Returns absolute matching file paths sorted by modification time\n" +
-			"- Use this tool when you need to find files by name patterns",
-		promptSnippet: "Find files by glob pattern, optionally under a specific absolute directory.",
-		promptGuidelines: ["Use glob instead of shell find when you need files by name or path pattern."],
+			"PURPOSE: Find files by name or path pattern, optionally under a specific absolute directory. Returns absolute matching file paths with recent files first and alphabetical fallback ordering, and reports shown-versus-total when results are truncated.\n" +
+			"KEYWORDS: [GlobMatch, FileDiscovery, NamePattern, PathPattern, AbsolutePath, RecentFirst, AlphabeticalFallback, ShownTotal, RefinePattern]",
+		promptSnippet: "GlobMatch file-discovery path-pattern shown-total refine-pattern",
+		promptGuidelines: ["Pattern-search: use glob instead of shell find when you need files by name or path pattern."],
 		parameters: Params,
 		async execute(
 			_toolCallId: string,

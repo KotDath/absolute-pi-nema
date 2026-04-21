@@ -77,11 +77,12 @@ export function registerWriteFile(pi: ExtensionAPI, fileAccessState: FileAccessS
 		name: "write_file",
 		label: "Write File",
 		description:
-			"Writes content to a specified file in the local filesystem. Creates parent directories when needed. Overwriting an existing file requires a fresh read_file of that same path first.",
-		promptSnippet: "Write a file by absolute path, creating parent directories if needed.",
+			"PURPOSE: Write a file by absolute path, creating parent directories when needed. Use this for new files and full rewrites. Overwriting an existing file requires a fresh read_file of that same path first.\n" +
+			"KEYWORDS: [FileWrite, AbsolutePath, CreateFile, RewriteFile, ParentDirs, ReadBeforeOverwrite, SummaryFirst]",
+		promptSnippet: "FileWrite absolute-path create rewrite read-before-overwrite",
 		promptGuidelines: [
-			"Use write_file for new files or complete rewrites.",
-			"Read an existing file with read_file before overwriting it with write_file.",
+			"Create-or-rewrite: use write_file for new files or complete rewrites.",
+			"Read-before-overwrite: read an existing file with read_file before overwriting it with write_file.",
 		],
 		parameters: Params,
 		prepareArguments,

@@ -28,7 +28,7 @@ export function registerAllTools(pi: ExtensionAPI) {
 	registerReadFile(pi, fileAccessState);
 	registerWriteFile(pi, fileAccessState);
 	registerEdit(pi, fileAccessState);
-	registerRunShell(pi);
+	registerRunShell(pi, fileAccessState);
 	registerListDirectory(pi);
 	registerGrepSearch(pi);
 	registerGlob(pi);

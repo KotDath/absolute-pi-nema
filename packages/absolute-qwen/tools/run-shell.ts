@@ -3,9 +3,10 @@ import { createWriteStream, mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { AgentToolResult, AgentToolUpdateCallback } from "@mariozechner/pi-agent-core";
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { createLocalBashOperations, type ExtensionAPI, type ExtensionContext } from "@mariozechner/pi-coding-agent";
 import type { Static } from "@sinclair/typebox";
 import { Type } from "@sinclair/typebox";
+import type { FileAccessState } from "../lib/file-access-state.ts";
 import { resolveWorkingDirectory } from "../lib/path.ts";
 
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -149,17 +150,18 @@ function buildFinalText(
 	return text;
 }
 
-export function registerRunShell(pi: ExtensionAPI) {
+export function registerRunShell(pi: ExtensionAPI, fileAccessState: FileAccessState) {
 	pi.registerTool({
 		name: "run_shell_command",
 		label: "Run Shell Command",
 		description:
-			"Executes a bash command via `bash -lc` in the current project or a specified directory. Foreground commands stream live output updates, keep the latest tail in the model context, and save the full log to a temp file when output grows large. Background mode is a detached best-effort launch for long-running processes.\n\n" +
+			"PURPOSE: Execute a bash command via `bash -lc` in the current project or a specified directory. Foreground commands stream live output updates, keep the latest tail in the model context, and save the full log to a temp file when output grows large. Background mode is a detached best-effort launch for long-running processes.\n" +
+			"KEYWORDS: [ShellExec, Build, Test, Git, PackageManager, StreamOutput, TailOutput, FullLog, BackgroundLaunch, NoFileRead, NoGrep]\n\n" +
 			"IMPORTANT: Use specialized tools for reading, writing, editing, listing, globbing, and grep-style search. This tool is for terminal operations such as git, package managers, build systems, test runners, and process control.",
-		promptSnippet: "Run a shell command in the project or a specified directory.",
+		promptSnippet: "ShellExec build test git stream-output full-log",
 		promptGuidelines: [
-			"Use run_shell_command for terminal workflows such as git, tests, builds, and package managers.",
-			"Do not use run_shell_command for file reads, file edits, directory listing, globbing, or grep-style search when a specialized tool exists.",
+			"Terminal-workflows only: use run_shell_command for git, tests, builds, package managers, and process control.",
+			"No file-read/search fallback: do not use run_shell_command for file reads, edits, directory listing, globbing, or grep-style search when a specialized tool exists.",
 		],
 		parameters: Params,
 		prepareArguments,
@@ -181,6 +183,7 @@ export function registerRunShell(pi: ExtensionAPI) {
 					stdio: "ignore",
 				});
 				child.unref();
+				fileAccessState.invalidateAllReads();
 
 				return {
 					content: [
@@ -199,10 +202,7 @@ export function registerRunShell(pi: ExtensionAPI) {
 			}
 
 			return new Promise<AgentToolResult<RunShellDetails>>((resolve, reject) => {
-				const child = spawn("bash", ["-lc", params.command], {
-					cwd,
-					stdio: ["ignore", "pipe", "pipe"],
-				});
+				const operations = createLocalBashOperations();
 
 				let tempFilePath: string | undefined;
 				let tempFileStream: ReturnType<typeof createWriteStream> | undefined;
@@ -211,8 +211,6 @@ export function registerRunShell(pi: ExtensionAPI) {
 				let chunksBytes = 0;
 				const maxChunkBytes = MAX_TAIL_CHARS * 2;
 				let finished = false;
-				let timedOut = false;
-				let aborted = false;
 
 				const ensureTempFile = () => {
 					if (tempFilePath) {
@@ -277,19 +275,24 @@ export function registerRunShell(pi: ExtensionAPI) {
 					emitUpdate();
 				};
 
-				const finalize = (status: "success" | "error" | "timeout" | "aborted", exitCode?: number | null) => {
+				const finalize = (
+					status: "success" | "error" | "timeout" | "aborted",
+					exitCode?: number | null,
+					invalidateReads: boolean = true,
+				) => {
 					if (finished) {
 						return;
 					}
 					finished = true;
-					clearTimeout(timer);
-					signal?.removeEventListener("abort", abortListener);
 
 					const tail = truncateTail(Buffer.concat(chunks).toString("utf8"));
 					if (tail.truncated) {
 						ensureTempFile();
 					}
 					const endedAt = Date.now();
+					if (invalidateReads) {
+						fileAccessState.invalidateAllReads();
+					}
 
 					closeTempFile(() => {
 						const text = buildFinalText(tail, tempFilePath, status, exitCode, timeout);
@@ -317,18 +320,6 @@ export function registerRunShell(pi: ExtensionAPI) {
 						reject(new Error(text));
 					});
 				};
-
-				const timer = setTimeout(() => {
-					timedOut = true;
-					child.kill("SIGTERM");
-				}, timeout);
-
-				const abortListener = () => {
-					aborted = true;
-					child.kill("SIGTERM");
-				};
-
-				signal?.addEventListener("abort", abortListener, { once: true });
 				onUpdate?.({
 					content: [],
 					details: {
@@ -338,32 +329,36 @@ export function registerRunShell(pi: ExtensionAPI) {
 					},
 				});
 
-				child.stdout.on("data", handleData);
-				child.stderr.on("data", handleData);
-				child.on("error", (error) => {
-					if (finished) {
-						return;
-					}
-					finished = true;
-					clearTimeout(timer);
-					signal?.removeEventListener("abort", abortListener);
-					closeTempFile(() => reject(error));
-				});
-				child.on("close", (code) => {
-					if (aborted) {
-						finalize("aborted", code);
-						return;
-					}
-					if (timedOut) {
-						finalize("timeout", code);
-						return;
-					}
-					if (code !== 0) {
-						finalize("error", code);
-						return;
-					}
-					finalize("success", code);
-				});
+				void operations
+					.exec(params.command, cwd, {
+						onData: handleData,
+						signal,
+						timeout: timeout / 1000,
+					})
+					.then(({ exitCode }) => {
+						if (exitCode !== 0) {
+							finalize("error", exitCode);
+							return;
+						}
+						finalize("success", exitCode);
+					})
+					.catch((error) => {
+						if (finished) {
+							return;
+						}
+						if (error instanceof Error) {
+							if (error.message === "aborted") {
+								finalize("aborted", null);
+								return;
+							}
+							if (error.message.startsWith("timeout:")) {
+								finalize("timeout", null);
+								return;
+							}
+						}
+						finished = true;
+						closeTempFile(() => reject(error));
+					});
 			});
 		},
 	});

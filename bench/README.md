@@ -5,6 +5,7 @@ This directory separates benchmark data from benchmark runners.
 - `fixtures/` contains file trees copied into a temporary workspace per scenario.
 - `scenarios/` contains JSON scenario specs.
 - `scripts/run-bench.mjs` is the thin runner that launches real `pi` processes against those specs.
+- each scenario run writes `trace.jsonl` and `metrics.json` into its temporary workspace
 
 The current format is intentionally small but future-proof:
 
@@ -53,6 +54,18 @@ The current format is intentionally small but future-proof:
 ## Model Selection
 
 The runner uses the default locally available `pi` model/provider unless overridden.
+
+## Token Metrics
+
+For each scenario, the runner aggregates usage from assistant messages and reports:
+
+- `input`
+- `output`
+- `cacheRead`
+- `cacheWrite`
+- `totalTokens`
+
+These metrics are shown in console output and also stored in `metrics.json` next to the captured `trace.jsonl`.
 
 Optional environment overrides:
 

@@ -20,6 +20,8 @@ type ToolResultEntryLike = {
 	};
 };
 
+type LegacyToolName = "read_file" | "write_file" | "edit";
+
 function normalizeTrackedPath(filePath: string): string {
 	return path.resolve(filePath);
 }
@@ -41,19 +43,41 @@ export class FileAccessState {
 			}
 
 			const tracking = (entry.message.details as FileTrackingDetails | undefined)?.tracking;
-			if (!tracking?.path) {
-				continue;
-			}
+			if (tracking?.path) {
+				const filePath = normalizeTrackedPath(tracking.path);
+				if (tracking.action === "read") {
+					this.currentVersions.set(filePath, tracking.version);
+					this.lastReadVersions.set(filePath, tracking.version);
+					continue;
+				}
 
-			const filePath = normalizeTrackedPath(tracking.path);
-			if (tracking.action === "read") {
 				this.currentVersions.set(filePath, tracking.version);
-				this.lastReadVersions.set(filePath, tracking.version);
+				this.lastReadVersions.delete(filePath);
 				continue;
 			}
 
-			this.currentVersions.set(filePath, tracking.version);
+			const legacyToolName = entry.message.toolName as LegacyToolName | undefined;
+			const legacyPath = this.getLegacyTrackedPath(entry.message.details);
+			if (!legacyToolName || !legacyPath) {
+				continue;
+			}
+
+			const filePath = normalizeTrackedPath(legacyPath);
+			if (legacyToolName === "read_file") {
+				const version = this.currentVersions.get(filePath) ?? 0;
+				this.currentVersions.set(filePath, version);
+				this.lastReadVersions.set(filePath, version);
+				continue;
+			}
+
+			const nextVersion = (this.currentVersions.get(filePath) ?? 0) + 1;
+			this.currentVersions.set(filePath, nextVersion);
+			this.lastReadVersions.delete(filePath);
 		}
+	}
+
+	invalidateAllReads() {
+		this.lastReadVersions.clear();
 	}
 
 	markRead(filePath: string): number {
@@ -83,6 +107,16 @@ export class FileAccessState {
 		const normalized = normalizeTrackedPath(filePath);
 		const nextVersion = (this.currentVersions.get(normalized) ?? 0) + 1;
 		this.currentVersions.set(normalized, nextVersion);
+		this.lastReadVersions.delete(normalized);
 		return nextVersion;
+	}
+
+	private getLegacyTrackedPath(details: unknown): string | undefined {
+		if (!details || typeof details !== "object") {
+			return undefined;
+		}
+
+		const pathValue = (details as { path?: unknown }).path;
+		return typeof pathValue === "string" ? pathValue : undefined;
 	}
 }

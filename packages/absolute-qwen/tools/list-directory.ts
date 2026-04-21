@@ -51,9 +51,10 @@ export function registerListDirectory(pi: ExtensionAPI) {
 		name: "list_directory",
 		label: "List Directory",
 		description:
-			"Lists files and direct subdirectories inside an absolute directory path. Output is deterministic: directories first, then files, both sorted alphabetically.",
-		promptSnippet: "List files and subdirectories in an absolute directory path.",
-		promptGuidelines: ["Use list_directory instead of shell ls/find for direct directory inspection."],
+			"PURPOSE: List files and direct subdirectories inside an absolute directory path. Output is deterministic: directories first, then files, both sorted alphabetically.\n" +
+			"KEYWORDS: [DirectoryList, AbsolutePath, DeterministicOrder, DirectChildren, IgnorePatterns, ShownTotal]",
+		promptSnippet: "DirectoryList absolute-path direct-children shown-total",
+		promptGuidelines: ["Direct-inspection: use list_directory instead of shell ls/find for directory inspection."],
 		parameters: Params,
 		prepareArguments,
 		async execute(

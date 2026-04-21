@@ -153,11 +153,12 @@ export function registerGrepSearch(pi: ExtensionAPI) {
 		name: "grep_search",
 		label: "Grep Search",
 		description:
-			"A bounded regex search tool for file contents. Supports file or directory targets and optional glob filtering. Results are summarized with capped matches, capped files, and shortened snippets so large searches stay navigable. Use this instead of invoking grep or rg via the shell for content search tasks.",
-		promptSnippet: "Search file contents with regex and bounded, summary-first results.",
+			"PURPOSE: Search file contents with regex using bounded, summary-first results. Supports file or directory targets and optional glob filtering. Large searches are kept navigable with capped matches, capped files, and shortened snippets.\n" +
+			"KEYWORDS: [RegexSearch, ContentSearch, FileTarget, DirectoryTarget, GlobFilter, SearchFirst, RefineQuery, SummaryFirst, SnippetCap]",
+		promptSnippet: "RegexSearch content-search file-target glob-filter refine-query",
 		promptGuidelines: [
-			"Use grep_search for regex search tasks instead of invoking grep, rg, or find via run_shell_command.",
-			"Use grep_search first to locate relevant files or lines, then read_file for nearby context.",
+			"Search-first: use grep_search for regex search instead of grep, rg, or find via run_shell_command.",
+			"Search-then-read: locate relevant files or lines with grep_search, then use read_file for nearby context.",
 		],
 		parameters: Params,
 		async execute(

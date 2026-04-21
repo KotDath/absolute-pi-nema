@@ -107,12 +107,13 @@ export function registerReadFile(pi: ExtensionAPI, fileAccessState: FileAccessSt
 		name: "read_file",
 		label: "Read File",
 		description:
-			"Reads a file by absolute path using bounded, line-oriented pagination. The response always reports which lines were shown and how to continue reading with offset/limit. Use grep_search first to find relevant regions in large files, then read_file for the local context you need.",
-		promptSnippet: "Read a file by absolute path with bounded line pagination.",
+			"PURPOSE: Read a file by absolute path with bounded, line-oriented pagination and continuation hints. Use grep_search first for large-file discovery, then read_file for local context.\n" +
+			"KEYWORDS: [FileRead, AbsolutePath, Pagination, Offset, Limit, LocalContext, SearchFirst, ReadBeforeEdit, ReadBeforeWrite]",
+		promptSnippet: "FileRead absolute-path pagination offset limit local-context",
 		promptGuidelines: [
-			"Use read_file before edit or before overwriting an existing file with write_file.",
-			"Use read_file instead of shell commands such as cat, sed, or python for file reads.",
-			"Use grep_search first when locating symbols, errors, or exact strings in large files, then read_file around the relevant region.",
+			"Search-first: use grep_search to locate symbols, errors, or exact strings before read_file on large files.",
+			"Read-before-mutate: use read_file before edit or before overwriting an existing file with write_file.",
+			"No shell reads: avoid cat, sed, and python for file reads when read_file fits the task.",
 		],
 		parameters: Params,
 		prepareArguments,
