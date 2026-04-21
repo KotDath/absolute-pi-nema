@@ -1,0 +1,11 @@
+{
+	"id": "list-directory-basic",
+	"suite": "smoke",
+	"fixture": "list-directory-basic",
+	"prompt": "Use list_directory on {{fixtureRoot}} and answer with the top-level entry names only.",
+	"checks": {
+		"must_use_tools": ["list_directory"],
+		"must_not_use_tools": ["run_shell_command"],
+		"final_text_includes": ["docs", "src", "package.json"]
+	}
+}

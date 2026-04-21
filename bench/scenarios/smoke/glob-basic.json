@@ -1,0 +1,11 @@
+{
+	"id": "glob-basic",
+	"suite": "smoke",
+	"fixture": "glob-basic",
+	"prompt": "Use glob to find all .ts files under {{fixtureRoot}}/src and answer with the matching basenames only.",
+	"checks": {
+		"must_use_tools": ["glob"],
+		"must_not_use_tools": ["run_shell_command"],
+		"final_text_includes": ["index.ts", "util.ts"]
+	}
+}

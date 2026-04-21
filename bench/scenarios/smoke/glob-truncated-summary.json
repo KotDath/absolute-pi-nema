@@ -1,0 +1,21 @@
+{
+	"id": "glob-truncated-summary",
+	"suite": "smoke",
+	"fixture": "glob-many",
+	"prompt": "Use glob on {{fixtureRoot}} with pattern *.txt and answer with the total number of matches only.",
+	"checks": {
+		"must_use_tools": ["glob"],
+		"must_not_use_tools": ["run_shell_command"],
+		"tool_result_text_includes": [
+			{
+				"tool": "glob",
+				"text": "Showing 100 of 110"
+			},
+			{
+				"tool": "glob",
+				"text": "Narrow the pattern or path to continue."
+			}
+		],
+		"final_text_regex": "\\b110\\b"
+	}
+}

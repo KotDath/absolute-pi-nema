@@ -1,9 +1,9 @@
-import path from "node:path";
 import type { AgentToolResult, AgentToolUpdateCallback } from "@mariozechner/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import type { Static } from "@sinclair/typebox";
 import { Type } from "@sinclair/typebox";
 import { glob } from "glob";
+import { ensureAbsolutePath } from "../lib/path.ts";
 
 const MAX_FILES = 100;
 
@@ -18,17 +18,22 @@ const Params = Type.Object({
 
 type Params = Static<typeof Params>;
 
+interface GlobDetails {
+	searchDir: string;
+	total: number;
+	shown: number;
+	truncated: boolean;
+}
+
 export function registerGlob(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "glob",
 		label: "Glob",
 		description:
-			"Fast file pattern matching tool that works with any codebase size\n" +
-			'- Supports glob patterns like "**/*.js" or "src/**/*.ts"\n' +
-			"- Returns matching file paths sorted by modification time\n" +
-			"- Use this tool when you need to find files by name patterns\n" +
-			"- You have the capability to call multiple tools in a single response. It is always better to speculatively perform multiple searches as a batch that are potentially useful.",
-		promptSnippet: "Find files by glob pattern, optionally under a specific directory.",
+			"PURPOSE: Find files by name or path pattern, optionally under a specific absolute directory. Returns absolute matching file paths with recent files first and alphabetical fallback ordering, and reports shown-versus-total when results are truncated.\n" +
+			"KEYWORDS: [GlobMatch, FileDiscovery, NamePattern, PathPattern, AbsolutePath, RecentFirst, AlphabeticalFallback, ShownTotal, RefinePattern]",
+		promptSnippet: "GlobMatch file-discovery path-pattern shown-total refine-pattern",
+		promptGuidelines: ["Pattern-search: use glob instead of shell find when you need files by name or path pattern."],
 		parameters: Params,
 		async execute(
 			_toolCallId: string,
@@ -36,8 +41,8 @@ export function registerGlob(pi: ExtensionAPI) {
 			signal: AbortSignal | undefined,
 			_onUpdate: AgentToolUpdateCallback<unknown> | undefined,
 			ctx: ExtensionContext,
-		): Promise<AgentToolResult<unknown>> {
-			const searchDir = params.path ? path.resolve(params.path) : ctx.cwd;
+		): Promise<AgentToolResult<GlobDetails>> {
+			const searchDir = params.path ? ensureAbsolutePath(params.path, "Glob path") : ctx.cwd;
 
 			try {
 				const entries = await glob(params.pattern, {
@@ -53,7 +58,12 @@ export function registerGlob(pi: ExtensionAPI) {
 				if (entries.length === 0) {
 					return {
 						content: [{ type: "text", text: `No files found matching pattern "${params.pattern}" in ${searchDir}` }],
-						details: {},
+						details: {
+							searchDir,
+							total: 0,
+							shown: 0,
+							truncated: false,
+						},
 					};
 				}
 
@@ -81,18 +91,22 @@ export function registerGlob(pi: ExtensionAPI) {
 				const total = entries.length;
 				const truncated = total > MAX_FILES;
 				const shown = truncated ? entries.slice(0, MAX_FILES) : entries;
+				const shownCount = shown.length;
 
 				const fileList = shown.map((e) => String(e)).join("\n");
-				let text = `Found ${total} file(s) matching "${params.pattern}" in ${searchDir}, sorted by modification time (newest first):\n---\n${fileList}`;
+				let text = `Found ${total} file(s) matching "${params.pattern}" in ${searchDir}. Showing ${shownCount} of ${total}, sorted by modification time (newest first).\n\n${fileList}`;
 
 				if (truncated) {
-					text += `\n---\n[${total - MAX_FILES} files truncated] ...`;
+					text += `\n\n[Showing ${shownCount} of ${total} matches. Narrow the pattern or path to continue.]`;
 				}
 
-				return { content: [{ type: "text", text }], details: {} };
+				return {
+					content: [{ type: "text", text }],
+					details: { searchDir, total, shown: shownCount, truncated },
+				};
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
-				return { content: [{ type: "text", text: `Error during glob search: ${message}` }], details: {} };
+				throw new Error(`Glob search failed: ${message}`);
 			}
 		},
 	});

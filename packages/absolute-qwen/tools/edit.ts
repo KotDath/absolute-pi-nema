@@ -1,131 +1,271 @@
-import fs from "node:fs";
-import path from "node:path";
+import fs from "node:fs/promises";
 import type { AgentToolResult, AgentToolUpdateCallback } from "@mariozechner/pi-agent-core";
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { type ExtensionAPI, type ExtensionContext, withFileMutationQueue } from "@mariozechner/pi-coding-agent";
+import { Container, Text } from "@mariozechner/pi-tui";
 import type { Static } from "@sinclair/typebox";
 import { Type } from "@sinclair/typebox";
-import { createUnifiedDiff } from "../lib/diff.ts";
-import { preserveLineEnding, readFileWithEncoding } from "../lib/encoding.ts";
+import { createUnifiedDiff, summarizeDiff } from "../lib/diff.ts";
+import { preserveLineEnding, readFileWithEncoding, writeFileWithEncoding } from "../lib/encoding.ts";
+import type { FileAccessState, FileTrackingDetails } from "../lib/file-access-state.ts";
+import { ensureAbsolutePath } from "../lib/path.ts";
 
-const Params = Type.Object({
-	file_path: Type.String({ description: "The absolute path to the file to modify." }),
-	old_string: Type.String({
-		description:
-			"The exact literal text to replace (including all whitespace, indentation, newlines, and surrounding code).",
-	}),
-	new_string: Type.String({
-		description:
-			"The exact literal text to replace `old_string` with (also including all whitespace, indentation, newlines, and surrounding code).",
-	}),
-	replace_all: Type.Optional(
-		Type.Boolean({ description: "Set to true to replace every occurrence that matches `old_string`." }),
-	),
-});
+const Params = Type.Object(
+	{
+		file_path: Type.String({ description: "The absolute path to the file to modify." }),
+		old_string: Type.String({
+			description:
+				"The exact literal text to replace (including all whitespace, indentation, newlines, and surrounding code).",
+		}),
+		new_string: Type.String({
+			description:
+				"The exact literal text to replace `old_string` with (also including all whitespace, indentation, newlines, and surrounding code).",
+		}),
+		replace_all: Type.Optional(
+			Type.Boolean({ description: "Set to true to replace every occurrence that matches `old_string`." }),
+		),
+	},
+	{ additionalProperties: false },
+);
 
 type Params = Static<typeof Params>;
+
+interface EditDetails extends FileTrackingDetails {
+	path: string;
+	diffPreview?: string;
+	fullDiffPath?: string;
+	diffTruncated: boolean;
+	firstChangedLine?: number;
+	replacedCount: number;
+}
+
+type EditRenderArgs = Params & {
+	path?: unknown;
+	oldText?: unknown;
+	newText?: unknown;
+	search?: unknown;
+	content?: unknown;
+	replaceAll?: unknown;
+};
+
+type EditRenderTheme = {
+	fg: (token: "toolTitle" | "accent", text: string) => string;
+	bold: (text: string) => string;
+};
 
 function countOccurrences(content: string, search: string): number {
 	if (search.length === 0) {
 		return 0;
 	}
+
 	let count = 0;
-	let pos = content.indexOf(search);
-	while (pos !== -1) {
+	let position = content.indexOf(search);
+	while (position !== -1) {
 		count++;
-		pos = content.indexOf(search, pos + search.length);
+		position = content.indexOf(search, position + search.length);
 	}
 	return count;
 }
 
-export function registerEdit(pi: ExtensionAPI) {
+function findFirstChangedLine(original: string, updated: string): number | undefined {
+	const originalLines = original.split(/\r?\n/);
+	const updatedLines = updated.split(/\r?\n/);
+	const maxLines = Math.max(originalLines.length, updatedLines.length);
+
+	for (let index = 0; index < maxLines; index++) {
+		if (originalLines[index] !== updatedLines[index]) {
+			return index + 1;
+		}
+	}
+
+	return undefined;
+}
+
+function throwIfAborted(signal: AbortSignal | undefined) {
+	if (signal?.aborted) {
+		throw new Error("Operation aborted");
+	}
+}
+
+function prepareArguments(args: unknown): Params {
+	if (!args || typeof args !== "object") {
+		return args as Params;
+	}
+
+	const input = args as EditRenderArgs;
+
+	return {
+		...(args as Params),
+		file_path:
+			typeof input.file_path === "string"
+				? input.file_path
+				: typeof input.path === "string"
+					? input.path
+					: (input.file_path as string),
+		old_string:
+			typeof input.old_string === "string"
+				? input.old_string
+				: typeof input.oldText === "string"
+					? input.oldText
+					: typeof input.search === "string"
+						? input.search
+						: (input.old_string as string),
+		new_string:
+			typeof input.new_string === "string"
+				? input.new_string
+				: typeof input.newText === "string"
+					? input.newText
+					: typeof input.content === "string"
+						? input.content
+						: (input.new_string as string),
+		replace_all:
+			typeof input.replace_all === "boolean"
+				? input.replace_all
+				: typeof input.replaceAll === "boolean"
+					? input.replaceAll
+					: undefined,
+	};
+}
+
+function formatEditCall(args: EditRenderArgs | undefined, theme: EditRenderTheme) {
+	const filePath =
+		typeof args?.file_path === "string" ? args.file_path : typeof args?.path === "string" ? args.path : "...";
+	return `${theme.fg("toolTitle", theme.bold("edit"))} ${theme.fg("accent", filePath)}`;
+}
+
+function getTextContent(result: AgentToolResult<EditDetails>): string {
+	return result.content
+		.filter((item) => item.type === "text")
+		.map((item) => item.text ?? "")
+		.join("\n");
+}
+
+export function registerEdit(pi: ExtensionAPI, fileAccessState: FileAccessState) {
 	pi.registerTool({
 		name: "edit",
 		label: "Edit",
 		description:
-			"Replaces text within a file. By default, replaces a single occurrence. Set `replace_all` to true when you intend to modify every instance of `old_string`. This tool requires providing significant context around the change to ensure precise targeting. Always use the read_file tool to examine the file's current content before attempting a text replacement.\n\n" +
-			"Expectation for required parameters:\n" +
-			"1. `file_path` MUST be an absolute path; otherwise an error will be thrown.\n" +
-			"2. `old_string` MUST be the exact literal text to replace (including all whitespace, indentation, newlines, and surrounding code etc.).\n" +
-			"3. `new_string` MUST be the exact literal text to replace `old_string` with (also including all whitespace, indentation, newlines, and surrounding code etc.). Ensure the resulting code is correct and idiomatic.\n" +
-			"4. NEVER escape `old_string` or `new_string`, that would break the exact literal text requirement.\n" +
-			"**Important:** If ANY of the above are not satisfied, the tool will fail. CRITICAL for `old_string`: Must uniquely identify the single instance to change. Include at least 3 lines of context BEFORE and AFTER the target text, matching whitespace and indentation precisely. If this string matches multiple locations, or does not match exactly, the tool will fail.\n" +
-			"**Multiple replacements:** Set `replace_all` to true when you want to replace every occurrence that matches `old_string`.",
-		promptSnippet: "Replace exact text in a file using absolute path and full literal context.",
+			"PURPOSE: Replace exact text within a file using absolute path and full literal context. Always read the file with read_file first. old_string must match the current file contents exactly, including whitespace and line breaks. Set replace_all to true only when every matching occurrence should change.\n" +
+			"KEYWORDS: [ExactReplace, FileEdit, AbsolutePath, FullContext, ReadBeforeEdit, ReplaceAll, DiffPreview]",
+		promptSnippet: "ExactReplace absolute-path full-context read-before-edit",
+		promptGuidelines: [
+			"Read-before-edit: use read_file before edit.",
+			"Exact-match: old_string must match current file contents exactly, including whitespace and line endings.",
+			"Replace-all only when every exact occurrence should change.",
+		],
 		parameters: Params,
+		renderShell: "self",
+		prepareArguments,
 		async execute(
 			_toolCallId: string,
 			params: Params,
-			_signal: AbortSignal | undefined,
+			signal: AbortSignal | undefined,
 			_onUpdate: AgentToolUpdateCallback<unknown> | undefined,
 			_ctx: ExtensionContext,
-		): Promise<AgentToolResult<unknown>> {
-			const filePath = path.resolve(params.file_path);
+		): Promise<AgentToolResult<EditDetails>> {
+			throwIfAborted(signal);
 
-			if (!path.isAbsolute(params.file_path)) {
-				return {
-					content: [{ type: "text", text: `Error: File path must be absolute, but was relative: ${params.file_path}` }],
-					details: {},
-				};
+			const filePath = ensureAbsolutePath(params.file_path, "File path");
+			if (params.old_string.length === 0) {
+				throw new Error("old_string must not be empty.");
 			}
 
-			if (!fs.existsSync(filePath)) {
-				return { content: [{ type: "text", text: `Error: File not found: ${filePath}` }], details: {} };
-			}
+			return withFileMutationQueue(filePath, async () => {
+				throwIfAborted(signal);
+				fileAccessState.requireFreshRead(filePath, "edit");
 
-			try {
-				const { content: originalContent } = readFileWithEncoding(filePath);
+				try {
+					const stat = await fs.stat(filePath);
+					if (!stat.isFile()) {
+						throw new Error(`Path is not a file: ${filePath}`);
+					}
+				} catch (error) {
+					if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+						throw new Error(`File not found: ${filePath}`);
+					}
+					throw error;
+				}
+
+				const decoded = readFileWithEncoding(filePath);
+				const originalContent = decoded.content;
 				const occurrences = countOccurrences(originalContent, params.old_string);
 
 				if (occurrences === 0) {
-					return {
-						content: [
-							{
-								type: "text",
-								text: `Error: old_string not found in ${filePath}. Make sure the string matches exactly, including whitespace and indentation.`,
-							},
-						],
-						details: {},
-					};
+					throw new Error(
+						`old_string was not found in ${filePath}. Read the file again and make sure the match is exact.`,
+					);
 				}
 
 				if (occurrences > 1 && !params.replace_all) {
-					return {
-						content: [
-							{
-								type: "text",
-								text: `Error: old_string matches ${occurrences} locations in ${filePath}. Set replace_all to true to replace all occurrences, or provide more context to uniquely identify the single instance.`,
-							},
-						],
-						details: {},
-					};
+					throw new Error(
+						`old_string matches ${occurrences} locations in ${filePath}. Add more surrounding context or set replace_all to true.`,
+					);
 				}
 
-				let newContent: string;
-				if (params.replace_all) {
-					newContent = originalContent.split(params.old_string).join(params.new_string);
-				} else {
-					const index = originalContent.indexOf(params.old_string);
-					newContent =
-						originalContent.slice(0, index) +
-						params.new_string +
-						originalContent.slice(index + params.old_string.length);
+				const replacedCount = params.replace_all ? occurrences : 1;
+				let nextContent = params.replace_all
+					? originalContent.split(params.old_string).join(params.new_string)
+					: originalContent.replace(params.old_string, params.new_string);
+
+				nextContent = preserveLineEnding(originalContent, nextContent);
+				writeFileWithEncoding(filePath, nextContent, {
+					encoding: decoded.encoding,
+					hasBOM: decoded.hasBOM,
+				});
+				throwIfAborted(signal);
+
+				const diff = createUnifiedDiff(originalContent, nextContent, filePath);
+				const diffSummary = summarizeDiff(diff);
+				const version = fileAccessState.markMutation(filePath);
+				const summaryParts = [`Edited ${filePath}`, `${replacedCount} replacement(s)`];
+				const firstChangedLine = findFirstChangedLine(originalContent, nextContent);
+				if (firstChangedLine !== undefined) {
+					summaryParts.push(`first changed line ${firstChangedLine}`);
+				}
+				const textParts = [summaryParts.join(" | ")];
+				if (diffSummary.preview) {
+					textParts.push(diffSummary.preview);
 				}
 
-				// Preserve line endings
-				newContent = preserveLineEnding(originalContent, newContent);
-				fs.writeFileSync(filePath, newContent, "utf-8");
-
-				const diff = createUnifiedDiff(originalContent, newContent, filePath);
-				let text = `Successfully edited ${filePath}`;
-				if (diff) {
-					text += `\n\n${diff}`;
-				}
-
-				return { content: [{ type: "text", text }], details: {} };
-			} catch (error) {
-				const message = error instanceof Error ? error.message : String(error);
-				return { content: [{ type: "text", text: `Error editing file: ${message}` }], details: {} };
+				return {
+					content: [
+						{
+							type: "text",
+							text: textParts.join("\n\n"),
+						},
+					],
+					details: {
+						path: filePath,
+						diffPreview: diffSummary.preview || undefined,
+						fullDiffPath: diffSummary.fullDiffPath,
+						diffTruncated: diffSummary.truncated,
+						firstChangedLine,
+						replacedCount,
+						tracking: {
+							action: "edit",
+							path: filePath,
+							version,
+						},
+					},
+				};
+			});
+		},
+		renderCall(args, theme, context) {
+			const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
+			text.setText(formatEditCall(args as EditRenderArgs | undefined, theme));
+			return text;
+		},
+		renderResult(result, _options, theme, context) {
+			const typedResult = result as AgentToolResult<EditDetails>;
+			const output = context.isError ? getTextContent(typedResult) : typedResult.details?.diffPreview;
+			if (!output) {
+				const container = (context.lastComponent as Container | undefined) ?? new Container();
+				container.clear();
+				return container;
 			}
+
+			const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
+			text.setText(`\n${context.isError ? theme.fg("error", output) : theme.fg("toolOutput", output)}`);
+			return text;
 		},
 	});
 }

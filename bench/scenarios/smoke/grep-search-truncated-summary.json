@@ -1,0 +1,21 @@
+{
+	"id": "grep-search-truncated-summary",
+	"suite": "smoke",
+	"fixture": "grep-search-many",
+	"prompt": "Use grep_search on {{fixtureRoot}} to find TODO comments and answer with the total number of TODO matches only.",
+	"checks": {
+		"must_use_tools": ["grep_search"],
+		"must_not_use_tools": ["run_shell_command"],
+		"tool_result_text_includes": [
+			{
+				"tool": "grep_search",
+				"text": "Showing 7 of 9 matches across 2 of 2 files."
+			},
+			{
+				"tool": "grep_search",
+				"text": "Refine the pattern, path, or glob to continue."
+			}
+		],
+		"final_text_regex": "\\b9\\b"
+	}
+}

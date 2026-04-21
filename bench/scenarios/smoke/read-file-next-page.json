@@ -1,0 +1,11 @@
+{
+	"id": "read-file-next-page",
+	"suite": "smoke",
+	"fixture": "read-file-large",
+	"prompt": "Use read_file to find the exact content of line 255 in {{fixtureRoot}}/large.txt and answer with that line only.",
+	"checks": {
+		"must_use_tools": ["read_file"],
+		"must_not_use_tools": ["run_shell_command"],
+		"final_text_includes": ["target=SECOND_PAGE"]
+	}
+}

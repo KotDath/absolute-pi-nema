@@ -1,10 +1,15 @@
-import fs from "node:fs";
-import path from "node:path";
 import type { AgentToolResult, AgentToolUpdateCallback } from "@mariozechner/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import type { Static } from "@sinclair/typebox";
 import { Type } from "@sinclair/typebox";
-import { truncateOutput } from "../lib/truncate.ts";
+import { readFileWithEncoding } from "../lib/encoding.ts";
+import type { FileAccessState, FileTrackingDetails } from "../lib/file-access-state.ts";
+import { ensureAbsolutePath } from "../lib/path.ts";
+
+const DEFAULT_LIMIT_LINES = 250;
+const MAX_LIMIT_LINES = 500;
+const MAX_OUTPUT_CHARS = 16 * 1024;
+const MAX_LINE_CHARS = 1_200;
 
 const Params = Type.Object({
 	file_path: Type.String({
@@ -14,7 +19,7 @@ const Params = Type.Object({
 	offset: Type.Optional(
 		Type.Number({
 			description:
-				"Optional: For text files, the 0-based line number to start reading from. Use with 'limit' to paginate through large files.",
+				"Optional: Line number to start reading from. The first line is 1. A value of 0 is accepted as a compatibility alias for the start of the file.",
 		}),
 	),
 	limit: Type.Optional(
@@ -27,57 +32,178 @@ const Params = Type.Object({
 
 type Params = Static<typeof Params>;
 
-export function registerReadFile(pi: ExtensionAPI) {
+interface ReadFileDetails extends FileTrackingDetails {
+	path: string;
+	encoding: string;
+	range: {
+		startLine: number;
+		endLine: number;
+		totalLines: number;
+	};
+	nextOffset?: number;
+	truncated: boolean;
+}
+
+function throwIfAborted(signal: AbortSignal | undefined) {
+	if (signal?.aborted) {
+		throw new Error("Operation aborted");
+	}
+}
+
+function truncateLine(line: string): { text: string; truncated: boolean } {
+	if (line.length <= MAX_LINE_CHARS) {
+		return { text: line, truncated: false };
+	}
+	return {
+		text: `${line.slice(0, MAX_LINE_CHARS)} [Line truncated at ${MAX_LINE_CHARS} characters.]`,
+		truncated: true,
+	};
+}
+
+function formatFooter(options: {
+	totalLines: number;
+	endLine: number;
+	nextOffset?: number;
+	lineLimitApplied: boolean;
+	outputCharLimitApplied: boolean;
+	longLinesTruncated: boolean;
+}) {
+	const notes: string[] = [];
+	if (options.lineLimitApplied) {
+		notes.push(`Line limit applied: maximum ${MAX_LIMIT_LINES} lines per call.`);
+	}
+	if (options.outputCharLimitApplied) {
+		notes.push(`Output capped at ${MAX_OUTPUT_CHARS} characters.`);
+	}
+	if (options.longLinesTruncated) {
+		notes.push(`Long lines were truncated at ${MAX_LINE_CHARS} characters.`);
+	}
+	if (options.nextOffset !== undefined && options.endLine < options.totalLines) {
+		notes.push(
+			`${options.totalLines - options.endLine} more line(s) remain. Use offset=${options.nextOffset} to continue.`,
+		);
+	}
+	return notes.length > 0 ? `\n\n[${notes.join(" ")}]` : "";
+}
+
+function prepareArguments(args: unknown): Params {
+	if (!args || typeof args !== "object") {
+		return args as Params;
+	}
+
+	const input = args as { file_path?: unknown; path?: unknown };
+	if (typeof input.file_path === "string" || typeof input.path !== "string") {
+		return args as Params;
+	}
+
+	return {
+		...(args as Params),
+		file_path: input.path,
+	};
+}
+
+export function registerReadFile(pi: ExtensionAPI, fileAccessState: FileAccessState) {
 	pi.registerTool({
 		name: "read_file",
 		label: "Read File",
 		description:
-			"Reads and returns the content of a specified file. If the file is large, the content will be truncated. The tool's response will clearly indicate if truncation has occurred and will provide details on how to read more of the file using the 'offset' and 'limit' parameters. Handles text files with specific line ranges.",
-		promptSnippet: "Read a file by absolute path, optionally with line offset/limit.",
+			"PURPOSE: Read a file by absolute path with bounded, line-oriented pagination and continuation hints. Use grep_search first for large-file discovery, then read_file for local context.\n" +
+			"KEYWORDS: [FileRead, AbsolutePath, Pagination, Offset, Limit, LocalContext, SearchFirst, ReadBeforeEdit, ReadBeforeWrite]",
+		promptSnippet: "FileRead absolute-path pagination offset limit local-context",
+		promptGuidelines: [
+			"Search-first: use grep_search to locate symbols, errors, or exact strings before read_file on large files.",
+			"Read-before-mutate: use read_file before edit or before overwriting an existing file with write_file.",
+			"No shell reads: avoid cat, sed, and python for file reads when read_file fits the task.",
+		],
 		parameters: Params,
+		prepareArguments,
 		async execute(
 			_toolCallId: string,
 			params: Params,
-			_signal: AbortSignal | undefined,
+			signal: AbortSignal | undefined,
 			_onUpdate: AgentToolUpdateCallback<unknown> | undefined,
 			_ctx: ExtensionContext,
-		): Promise<AgentToolResult<unknown>> {
-			const filePath = path.resolve(params.file_path);
+		): Promise<AgentToolResult<ReadFileDetails>> {
+			throwIfAborted(signal);
 
-			if (!path.isAbsolute(params.file_path)) {
-				return {
-					content: [{ type: "text", text: `Error: File path must be absolute, but was relative: ${params.file_path}` }],
-					details: {},
-				};
+			const filePath = ensureAbsolutePath(params.file_path, "File path");
+			const { content, encoding } = readFileWithEncoding(filePath);
+			throwIfAborted(signal);
+
+			const lines = content.split(/\r?\n/);
+			const totalLines = lines.length;
+			const startLine = params.offset === undefined ? 1 : Math.max(1, Math.trunc(params.offset));
+			const startIndex = startLine - 1;
+
+			if (startIndex >= totalLines) {
+				throw new Error(`Offset ${startLine} is beyond end of file (${totalLines} line(s) total).`);
 			}
 
-			if (!fs.existsSync(filePath)) {
-				return { content: [{ type: "text", text: `Error: File not found: ${filePath}` }], details: {} };
-			}
+			const requestedLimit = params.limit === undefined ? DEFAULT_LIMIT_LINES : Math.max(1, Math.trunc(params.limit));
+			const lineLimit = Math.min(requestedLimit, MAX_LIMIT_LINES);
+			const requestedEndIndex = Math.min(startIndex + lineLimit, totalLines);
+			const selectedLines: string[] = [];
+			let endIndex = startIndex;
+			let currentChars = 0;
+			let outputCharLimitApplied = false;
+			let longLinesTruncated = false;
 
-			try {
-				const content = fs.readFileSync(filePath, "utf-8");
-				const lines = content.split("\n");
-				const totalLines = lines.length;
-
-				const offset = params.offset ?? 0;
-				const limit = params.limit ?? totalLines;
-				const endLine = Math.min(offset + limit, totalLines);
-				const selectedLines = lines.slice(offset, endLine);
-
-				let text = selectedLines.join("\n");
-
-				if (offset > 0 || endLine < totalLines) {
-					text = `Showing lines ${offset + 1}-${endLine} of ${totalLines} total lines.\n\n---\n\n${text}`;
+			for (let index = startIndex; index < requestedEndIndex; index++) {
+				const truncatedLine = truncateLine(lines[index] ?? "");
+				longLinesTruncated ||= truncatedLine.truncated;
+				const separator = selectedLines.length === 0 ? "" : "\n";
+				const nextChunk = `${separator}${truncatedLine.text}`;
+				if (selectedLines.length > 0 && currentChars + nextChunk.length > MAX_OUTPUT_CHARS) {
+					outputCharLimitApplied = true;
+					break;
 				}
-
-				text = truncateOutput(text);
-
-				return { content: [{ type: "text", text }], details: {} };
-			} catch (error) {
-				const message = error instanceof Error ? error.message : String(error);
-				return { content: [{ type: "text", text: `Error reading file: ${message}` }], details: {} };
+				selectedLines.push(truncatedLine.text);
+				currentChars += nextChunk.length;
+				endIndex = index + 1;
 			}
+
+			if (selectedLines.length === 0) {
+				const truncatedLine = truncateLine(lines[startIndex] ?? "");
+				selectedLines.push(truncatedLine.text);
+				longLinesTruncated ||= truncatedLine.truncated;
+				endIndex = startIndex + 1;
+			}
+
+			const text = selectedLines.join("\n");
+			const nextOffset = endIndex < totalLines ? endIndex + 1 : undefined;
+			const lineLimitApplied = requestedLimit > MAX_LIMIT_LINES;
+			const truncated = lineLimitApplied || outputCharLimitApplied || longLinesTruncated || nextOffset !== undefined;
+			const header = `Showing lines ${startIndex + 1}-${endIndex} of ${totalLines}.`;
+			const footer = formatFooter({
+				totalLines,
+				endLine: endIndex,
+				nextOffset,
+				lineLimitApplied,
+				outputCharLimitApplied,
+				longLinesTruncated,
+			});
+
+			const version = fileAccessState.markRead(filePath);
+
+			return {
+				content: [{ type: "text", text: `${header}\n\n${text}${footer}`.trim() }],
+				details: {
+					path: filePath,
+					encoding,
+					range: {
+						startLine: startIndex + 1,
+						endLine: endIndex,
+						totalLines,
+					},
+					nextOffset,
+					truncated,
+					tracking: {
+						action: "read",
+						path: filePath,
+						version,
+					},
+				},
+			};
 		},
 	});
 }
