@@ -144,11 +144,11 @@ export function registerEdit(pi: ExtensionAPI, fileAccessState: FileAccessState)
 		name: "edit",
 		label: "Edit",
 		description:
-			"PURPOSE: Replace exact text within a file using absolute path and full literal context. Always read the file with read_file first. old_string must match the current file contents exactly, including whitespace and line breaks. Set replace_all to true only when every matching occurrence should change.\n" +
+			"PURPOSE: Replace exact text within a file using absolute path and full literal context. Always read the file with read first. old_string must match the current file contents exactly, including whitespace and line breaks. Set replace_all to true only when every matching occurrence should change.\n" +
 			"KEYWORDS: [ExactReplace, FileEdit, AbsolutePath, FullContext, ReadBeforeEdit, ReplaceAll, DiffPreview]",
 		promptSnippet: "ExactReplace absolute-path full-context read-before-edit",
 		promptGuidelines: [
-			"Read-before-edit: use read_file before edit.",
+			"Read-before-edit: use read before edit.",
 			"Exact-match: old_string must match current file contents exactly, including whitespace and line endings.",
 			"Replace-all only when every exact occurrence should change.",
 		],

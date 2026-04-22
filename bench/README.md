@@ -3,6 +3,7 @@
 This directory separates benchmark data from benchmark runners.
 
 - `fixtures/` contains file trees copied into a temporary workspace per scenario.
+- `skills/` contains local synthetic skills used by skill-focused scenarios.
 - `scenarios/` contains JSON scenario specs.
 - `scripts/run-bench.mjs` is the thin runner that launches real `pi` processes against those specs.
 - each scenario run writes `trace.jsonl` and `metrics.json` into its temporary workspace
@@ -20,13 +21,13 @@ The current format is intentionally small but future-proof:
   "id": "read-file-basic",
   "suite": "smoke",
   "fixture": "read-file-basic",
-  "prompt": "Use read_file on {{fixtureRoot}}/package.json and answer with packageManager only.",
+  "prompt": "Use read on {{fixtureRoot}}/package.json and answer with packageManager only.",
   "pi_args": ["--thinking", "low"],
   "checks": {
-    "must_use_tools": ["read_file"],
-    "must_not_use_tools": ["run_shell_command"],
-    "must_error_tools": ["write_file"],
-    "must_not_error_tools": ["read_file"],
+    "must_use_tools": ["read"],
+    "must_not_use_tools": ["bash"],
+    "must_error_tools": ["write"],
+    "must_not_error_tools": ["read"],
     "final_text_includes": ["pnpm@10.33.0"],
     "final_text_regex": "^pnpm@",
     "files_exact": [
@@ -43,6 +44,8 @@ The current format is intentionally small but future-proof:
 
 - `{{fixtureRoot}}` - absolute path to the temporary workspace for this scenario
 - `{{repoRoot}}` - absolute path to this repository root
+
+`prompt` and `pi_args` both support these template variables.
 
 ## Commands
 

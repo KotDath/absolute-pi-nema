@@ -2,12 +2,12 @@
 	"id": "write-overwrite-requires-read",
 	"suite": "guardrails",
 	"fixture": "requires-read",
-	"prompt": "Do not use read_file. Attempt to overwrite {{fixtureRoot}}/guard.txt directly with write_file so it becomes gamma and a trailing newline, then report the tool error briefly.",
+	"prompt": "Do not use read. Attempt to overwrite {{fixtureRoot}}/guard.txt directly with write so it becomes gamma and a trailing newline, then report the tool error briefly.",
 	"checks": {
-		"must_use_tools": ["write_file"],
-		"must_not_use_tools": ["read_file"],
-		"must_error_tools": ["write_file"],
-		"final_text_includes": ["read_file", "write_file"],
+		"must_use_tools": ["write"],
+		"must_not_use_tools": ["read"],
+		"must_error_tools": ["write"],
+		"final_text_includes": ["read", "write"],
 		"files_exact": [
 			{
 				"path": "guard.txt",

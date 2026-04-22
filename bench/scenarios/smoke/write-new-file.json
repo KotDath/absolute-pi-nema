@@ -2,10 +2,10 @@
 	"id": "write-new-file",
 	"suite": "smoke",
 	"fixture": "write-new-file",
-	"prompt": "Create {{fixtureRoot}}/new.txt with exact content bench followed by a newline using write_file. Reply with created only.",
+	"prompt": "Create {{fixtureRoot}}/new.txt with exact content bench followed by a newline using write. Reply with created only.",
 	"checks": {
-		"must_use_tools": ["write_file"],
-		"must_not_use_tools": ["run_shell_command"],
+		"must_use_tools": ["write"],
+		"must_not_use_tools": ["bash"],
 		"final_text_includes": ["created"],
 		"files_exact": [
 			{

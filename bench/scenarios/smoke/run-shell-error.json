@@ -1,17 +1,17 @@
 {
 	"id": "run-shell-error",
 	"suite": "smoke",
-	"prompt": "Use run_shell_command to run `printf 'fail-shell\\n' | tee fail.txt; exit 7` and answer with the exit code only.",
+	"prompt": "Use bash to run `printf 'fail-shell\\n' | tee fail.txt; exit 7` and answer with the exit code only.",
 	"checks": {
-		"must_use_tools": ["run_shell_command"],
-		"must_error_tools": ["run_shell_command"],
+		"must_use_tools": ["bash"],
+		"must_error_tools": ["bash"],
 		"tool_result_text_includes": [
 			{
-				"tool": "run_shell_command",
+				"tool": "bash",
 				"text": "fail-shell"
 			},
 			{
-				"tool": "run_shell_command",
+				"tool": "bash",
 				"text": "Exit code: 7"
 			}
 		],

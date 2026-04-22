@@ -12,7 +12,7 @@ const MAX_OUTPUT_CHARS = 16 * 1024;
 const MAX_LINE_CHARS = 1_200;
 
 const Params = Type.Object({
-	file_path: Type.String({
+	path: Type.String({
 		description:
 			"The absolute path to the file to read (e.g., '/home/user/project/file.txt'). Relative paths are not supported. You must provide an absolute path.",
 	}),
@@ -92,28 +92,28 @@ function prepareArguments(args: unknown): Params {
 	}
 
 	const input = args as { file_path?: unknown; path?: unknown };
-	if (typeof input.file_path === "string" || typeof input.path !== "string") {
+	if (typeof input.path === "string" || typeof input.file_path !== "string") {
 		return args as Params;
 	}
 
 	return {
 		...(args as Params),
-		file_path: input.path,
+		path: input.file_path,
 	};
 }
 
 export function registerReadFile(pi: ExtensionAPI, fileAccessState: FileAccessState) {
 	pi.registerTool({
-		name: "read_file",
-		label: "Read File",
+		name: "read",
+		label: "Read",
 		description:
-			"PURPOSE: Read a file by absolute path with bounded, line-oriented pagination and continuation hints. Use grep_search first for large-file discovery, then read_file for local context.\n" +
-			"KEYWORDS: [FileRead, AbsolutePath, Pagination, Offset, Limit, LocalContext, SearchFirst, ReadBeforeEdit, ReadBeforeWrite]",
-		promptSnippet: "FileRead absolute-path pagination offset limit local-context",
+			"PURPOSE: Read a file by absolute path with bounded, line-oriented pagination and continuation hints. Use grep_search first for large-file discovery, then read for local context.\n" +
+			"KEYWORDS: [FileRead, read_file, AbsolutePath, Pagination, Offset, Limit, LocalContext, SearchFirst, ReadBeforeEdit, ReadBeforeWrite]",
+		promptSnippet: "FileRead read_file absolute-path pagination offset limit local-context",
 		promptGuidelines: [
-			"Search-first: use grep_search to locate symbols, errors, or exact strings before read_file on large files.",
-			"Read-before-mutate: use read_file before edit or before overwriting an existing file with write_file.",
-			"No shell reads: avoid cat, sed, and python for file reads when read_file fits the task.",
+			"Search-first: use grep_search to locate symbols, errors, or exact strings before read on large files.",
+			"Read-before-mutate: use read before edit or before overwriting an existing file with write.",
+			"No shell reads: avoid cat, sed, and python for file reads when read fits the task.",
 		],
 		parameters: Params,
 		prepareArguments,
@@ -126,7 +126,7 @@ export function registerReadFile(pi: ExtensionAPI, fileAccessState: FileAccessSt
 		): Promise<AgentToolResult<ReadFileDetails>> {
 			throwIfAborted(signal);
 
-			const filePath = ensureAbsolutePath(params.file_path, "File path");
+			const filePath = ensureAbsolutePath(params.path, "File path");
 			const { content, encoding } = readFileWithEncoding(filePath);
 			throwIfAborted(signal);
 

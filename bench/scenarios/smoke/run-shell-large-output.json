@@ -1,13 +1,13 @@
 {
 	"id": "run-shell-large-output",
 	"suite": "smoke",
-	"prompt": "Use run_shell_command to run `for i in $(seq 1 120); do echo line-$i; done | tee shell-output.txt` and answer with the last line only.",
+	"prompt": "Use bash to run `for i in $(seq 1 120); do echo line-$i; done | tee shell-output.txt` and answer with the last line only.",
 	"checks": {
-		"must_use_tools": ["run_shell_command"],
-		"must_stream_tools": ["run_shell_command"],
+		"must_use_tools": ["bash"],
+		"must_stream_tools": ["bash"],
 		"tool_result_text_includes": [
 			{
-				"tool": "run_shell_command",
+				"tool": "bash",
 				"text": "Full output:"
 			}
 		],

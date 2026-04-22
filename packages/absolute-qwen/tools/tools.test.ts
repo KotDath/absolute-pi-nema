@@ -16,6 +16,7 @@ import { registerWriteFile } from "./write-file.ts";
 
 type RegisteredToolLike = {
 	name: string;
+	prepareArguments?: (args: unknown) => Record<string, unknown>;
 	execute: (
 		toolCallId: string,
 		params: Record<string, unknown>,
@@ -81,13 +82,7 @@ describe("absolute-qwen tool contracts", () => {
 		const state = new FileAccessState();
 		const readTool = createToolStub((pi) => registerReadFile(pi, state));
 
-		const result = await readTool.execute(
-			"read-1",
-			{ file_path: filePath },
-			undefined,
-			undefined,
-			createContext(tempDir),
-		);
+		const result = await readTool.execute("read-1", { path: filePath }, undefined, undefined, createContext(tempDir));
 		const text = getTextContent(result);
 
 		expect(text).toContain("Showing lines 1-250 of 300.");
@@ -104,6 +99,17 @@ describe("absolute-qwen tool contracts", () => {
 		});
 	});
 
+	it("exposes read as the canonical tool name and normalizes file_path to path", async () => {
+		const state = new FileAccessState();
+		const readTool = createToolStub((pi) => registerReadFile(pi, state));
+
+		expect(readTool.name).toBe("read");
+		expect(readTool.prepareArguments?.({ file_path: "/tmp/example.txt", offset: 5 })).toMatchObject({
+			path: "/tmp/example.txt",
+			offset: 5,
+		});
+	});
+
 	it("reads a later page when offset and limit are provided", async () => {
 		const tempDir = await createTempDir();
 		const filePath = path.join(tempDir, "paged.txt");
@@ -115,7 +121,7 @@ describe("absolute-qwen tool contracts", () => {
 
 		const result = await readTool.execute(
 			"read-1",
-			{ file_path: filePath, offset: 101, limit: 20 },
+			{ path: filePath, offset: 101, limit: 20 },
 			undefined,
 			undefined,
 			createContext(tempDir),
@@ -147,7 +153,7 @@ describe("absolute-qwen tool contracts", () => {
 
 		const result = await readTool.execute(
 			"read-1",
-			{ file_path: filePath, limit: 999 },
+			{ path: filePath, limit: 999 },
 			undefined,
 			undefined,
 			createContext(tempDir),
@@ -168,13 +174,7 @@ describe("absolute-qwen tool contracts", () => {
 		const state = new FileAccessState();
 		const readTool = createToolStub((pi) => registerReadFile(pi, state));
 
-		const result = await readTool.execute(
-			"read-1",
-			{ file_path: filePath },
-			undefined,
-			undefined,
-			createContext(tempDir),
-		);
+		const result = await readTool.execute("read-1", { path: filePath }, undefined, undefined, createContext(tempDir));
 		const text = getTextContent(result);
 
 		expect(text).toContain("Line truncated at 1200 characters.");
@@ -194,7 +194,7 @@ describe("absolute-qwen tool contracts", () => {
 
 		const result = await readTool.execute(
 			"read-1",
-			{ file_path: filePath, limit: 40 },
+			{ path: filePath, limit: 40 },
 			undefined,
 			undefined,
 			createContext(tempDir),
@@ -350,7 +350,7 @@ describe("absolute-qwen tool contracts", () => {
 		const readTool = createToolStub((pi) => registerReadFile(pi, state));
 		const editTool = createToolStub((pi) => registerEdit(pi, state));
 
-		await readTool.execute("read-1", { file_path: filePath }, undefined, undefined, createContext(tempDir));
+		await readTool.execute("read-1", { path: filePath }, undefined, undefined, createContext(tempDir));
 		const result = await editTool.execute(
 			"edit-1",
 			{ file_path: filePath, old_string: "hello", new_string: "hi" },
@@ -390,7 +390,7 @@ describe("absolute-qwen tool contracts", () => {
 		const oldBlock = Array.from({ length: 120 }, (_, index) => `before line ${index + 1} ${beforeSuffix}`).join("\n");
 		const newBlock = Array.from({ length: 120 }, (_, index) => `after line ${index + 1} ${afterSuffix}`).join("\n");
 
-		await readTool.execute("read-1", { file_path: filePath }, undefined, undefined, createContext(tempDir));
+		await readTool.execute("read-1", { path: filePath }, undefined, undefined, createContext(tempDir));
 		const result = await editTool.execute(
 			"edit-1",
 			{ file_path: filePath, old_string: oldBlock, new_string: newBlock },
@@ -417,14 +417,14 @@ describe("absolute-qwen tool contracts", () => {
 		expect(diff).toContain("before line 1");
 	});
 
-	it("returns small run_shell_command output directly", async () => {
+	it("returns small bash output directly", async () => {
 		const tempDir = await createTempDir();
 		const state = new FileAccessState();
 		const shellTool = createToolStub((pi) => registerRunShell(pi, state));
 
 		const result = await shellTool.execute(
 			"shell-1",
-			{ command: "printf 'hello\\nworld\\n'", is_background: false },
+			{ command: "printf 'hello\\nworld\\n'" },
 			undefined,
 			undefined,
 			createContext(tempDir),
@@ -440,7 +440,29 @@ describe("absolute-qwen tool contracts", () => {
 		});
 	});
 
-	it("streams long run_shell_command output and saves the full log", async () => {
+	it("exposes bash as the canonical tool name and normalizes directory to cwd", async () => {
+		const state = new FileAccessState();
+		const shellTool = createToolStub((pi) => registerRunShell(pi, state));
+
+		expect(shellTool.name).toBe("bash");
+		expect(shellTool.prepareArguments?.({ command: "pwd", directory: "/tmp/demo", timeout: 3 })).toMatchObject({
+			command: "pwd",
+			cwd: "/tmp/demo",
+			timeout: 3,
+		});
+	});
+
+	it("interprets bash timeouts in seconds", async () => {
+		const tempDir = await createTempDir();
+		const state = new FileAccessState();
+		const shellTool = createToolStub((pi) => registerRunShell(pi, state));
+
+		await expect(
+			shellTool.execute("shell-1", { command: "sleep 2", timeout: 1 }, undefined, undefined, createContext(tempDir)),
+		).rejects.toThrow(/Timed out after 1s/);
+	});
+
+	it("streams long bash output and saves the full log", async () => {
 		const tempDir = await createTempDir();
 		const state = new FileAccessState();
 		const shellTool = createToolStub((pi) => registerRunShell(pi, state));
@@ -476,7 +498,7 @@ describe("absolute-qwen tool contracts", () => {
 		expect(log).toContain("line-120");
 	});
 
-	it("includes buffered output in run_shell_command errors", async () => {
+	it("includes buffered output in bash errors", async () => {
 		const tempDir = await createTempDir();
 		const state = new FileAccessState();
 		const shellTool = createToolStub((pi) => registerRunShell(pi, state));
@@ -492,7 +514,7 @@ describe("absolute-qwen tool contracts", () => {
 		).rejects.toThrow(/bad[\s\S]*Exit code: 7/);
 	});
 
-	it("invalidates read freshness after run_shell_command mutates a file", async () => {
+	it("invalidates read freshness after bash mutates a file", async () => {
 		const tempDir = await createTempDir();
 		const filePath = path.join(tempDir, "mutated.txt");
 		await fs.writeFile(filePath, "alpha\n", "utf8");
@@ -502,7 +524,7 @@ describe("absolute-qwen tool contracts", () => {
 		const shellTool = createToolStub((pi) => registerRunShell(pi, state));
 		const editTool = createToolStub((pi) => registerEdit(pi, state));
 
-		await readTool.execute("read-1", { file_path: filePath }, undefined, undefined, createContext(tempDir));
+		await readTool.execute("read-1", { path: filePath }, undefined, undefined, createContext(tempDir));
 		await shellTool.execute(
 			"shell-1",
 			{ command: `printf 'beta\\n' > ${JSON.stringify(filePath)}`, is_background: false },
@@ -519,7 +541,7 @@ describe("absolute-qwen tool contracts", () => {
 				undefined,
 				createContext(tempDir),
 			),
-		).rejects.toThrow(`Use read_file on ${filePath} before calling edit.`);
+		).rejects.toThrow(`Use read on ${filePath} before calling edit.`);
 	});
 
 	it("rebuilds file access state from legacy session entries without tracking metadata", async () => {
@@ -532,7 +554,7 @@ describe("absolute-qwen tool contracts", () => {
 				type: "message",
 				message: {
 					role: "toolResult",
-					toolName: "read_file",
+					toolName: "read",
 					details: { path: filePath },
 				},
 			},
@@ -544,7 +566,7 @@ describe("absolute-qwen tool contracts", () => {
 				type: "message",
 				message: {
 					role: "toolResult",
-					toolName: "read_file",
+					toolName: "read",
 					details: { path: filePath },
 				},
 			},
@@ -552,15 +574,15 @@ describe("absolute-qwen tool contracts", () => {
 				type: "message",
 				message: {
 					role: "toolResult",
-					toolName: "write_file",
+					toolName: "write",
 					details: { path: filePath },
 				},
 			},
 		]);
-		expect(() => state.requireFreshRead(filePath, "edit")).toThrow(`Use read_file on ${filePath} before calling edit.`);
+		expect(() => state.requireFreshRead(filePath, "edit")).toThrow(`Use read on ${filePath} before calling edit.`);
 	});
 
-	it("returns summary-only output when write_file creates a new file", async () => {
+	it("returns summary-only output when write creates a new file", async () => {
 		const tempDir = await createTempDir();
 		const filePath = path.join(tempDir, "new-file.txt");
 
@@ -569,7 +591,7 @@ describe("absolute-qwen tool contracts", () => {
 
 		const result = await writeTool.execute(
 			"write-1",
-			{ file_path: filePath, content: "created\n" },
+			{ path: filePath, content: "created\n" },
 			undefined,
 			undefined,
 			createContext(tempDir),
@@ -590,7 +612,18 @@ describe("absolute-qwen tool contracts", () => {
 		expect(details.lineCount).toBe(1);
 	});
 
-	it("returns an inline diff preview for small write_file overwrites", async () => {
+	it("exposes write as the canonical tool name and normalizes file_path to path", async () => {
+		const state = new FileAccessState();
+		const writeTool = createToolStub((pi) => registerWriteFile(pi, state));
+
+		expect(writeTool.name).toBe("write");
+		expect(writeTool.prepareArguments?.({ file_path: "/tmp/example.txt", content: "hello" })).toMatchObject({
+			path: "/tmp/example.txt",
+			content: "hello",
+		});
+	});
+
+	it("returns an inline diff preview for small write overwrites", async () => {
 		const tempDir = await createTempDir();
 		const filePath = path.join(tempDir, "overwrite.txt");
 		await fs.writeFile(filePath, "alpha\nbeta\n", "utf8");
@@ -599,10 +632,10 @@ describe("absolute-qwen tool contracts", () => {
 		const readTool = createToolStub((pi) => registerReadFile(pi, state));
 		const writeTool = createToolStub((pi) => registerWriteFile(pi, state));
 
-		await readTool.execute("read-1", { file_path: filePath }, undefined, undefined, createContext(tempDir));
+		await readTool.execute("read-1", { path: filePath }, undefined, undefined, createContext(tempDir));
 		const result = await writeTool.execute(
 			"write-1",
-			{ file_path: filePath, content: "gamma\nbeta\n" },
+			{ path: filePath, content: "gamma\nbeta\n" },
 			undefined,
 			undefined,
 			createContext(tempDir),
@@ -622,7 +655,7 @@ describe("absolute-qwen tool contracts", () => {
 		expect(details.firstChangedLine).toBe(1);
 	});
 
-	it("writes a full diff artifact for large write_file overwrites", async () => {
+	it("writes a full diff artifact for large write overwrites", async () => {
 		const tempDir = await createTempDir();
 		const filePath = path.join(tempDir, "large-write.txt");
 		const beforeSuffix = "C".repeat(80);
@@ -637,11 +670,11 @@ describe("absolute-qwen tool contracts", () => {
 		const readTool = createToolStub((pi) => registerReadFile(pi, state));
 		const writeTool = createToolStub((pi) => registerWriteFile(pi, state));
 
-		await readTool.execute("read-1", { file_path: filePath }, undefined, undefined, createContext(tempDir));
+		await readTool.execute("read-1", { path: filePath }, undefined, undefined, createContext(tempDir));
 		const result = await writeTool.execute(
 			"write-1",
 			{
-				file_path: filePath,
+				path: filePath,
 				content: Array.from({ length: 150 }, (_, index) => `after write ${index + 1} ${afterSuffix}`).join("\n"),
 			},
 			undefined,
@@ -667,7 +700,7 @@ describe("absolute-qwen tool contracts", () => {
 		expect(diff).toContain("before write 1");
 	});
 
-	it("requires read_file before overwriting an existing file", async () => {
+	it("requires read before overwriting an existing file", async () => {
 		const tempDir = await createTempDir();
 		const filePath = path.join(tempDir, "example.txt");
 		await fs.writeFile(filePath, "before\n", "utf8");
@@ -676,17 +709,11 @@ describe("absolute-qwen tool contracts", () => {
 		const writeTool = createToolStub((pi) => registerWriteFile(pi, state));
 
 		await expect(
-			writeTool.execute(
-				"tool-1",
-				{ file_path: filePath, content: "after\n" },
-				undefined,
-				undefined,
-				createContext(tempDir),
-			),
-		).rejects.toThrow(/Use read_file/);
+			writeTool.execute("tool-1", { path: filePath, content: "after\n" }, undefined, undefined, createContext(tempDir)),
+		).rejects.toThrow(/Use read/);
 	});
 
-	it("allows overwrite after read_file and preserves existing CRLF line endings", async () => {
+	it("allows overwrite after read and preserves existing CRLF line endings", async () => {
 		const tempDir = await createTempDir();
 		const filePath = path.join(tempDir, "example.txt");
 		await fs.writeFile(filePath, "alpha\r\nbeta\r\n", "utf8");
@@ -695,10 +722,10 @@ describe("absolute-qwen tool contracts", () => {
 		const readTool = createToolStub((pi) => registerReadFile(pi, state));
 		const writeTool = createToolStub((pi) => registerWriteFile(pi, state));
 
-		await readTool.execute("read-1", { file_path: filePath }, undefined, undefined, createContext(tempDir));
+		await readTool.execute("read-1", { path: filePath }, undefined, undefined, createContext(tempDir));
 		await writeTool.execute(
 			"write-1",
-			{ file_path: filePath, content: "gamma\nbeta\n" },
+			{ path: filePath, content: "gamma\nbeta\n" },
 			undefined,
 			undefined,
 			createContext(tempDir),
@@ -717,7 +744,7 @@ describe("absolute-qwen tool contracts", () => {
 		const readTool = createToolStub((pi) => registerReadFile(pi, state));
 		const editTool = createToolStub((pi) => registerEdit(pi, state));
 
-		await readTool.execute("read-1", { file_path: filePath }, undefined, undefined, createContext(tempDir));
+		await readTool.execute("read-1", { path: filePath }, undefined, undefined, createContext(tempDir));
 
 		await expect(
 			editTool.execute(
@@ -742,7 +769,7 @@ describe("absolute-qwen tool contracts", () => {
 		const readTool = createToolStub((pi) => registerReadFile(pi, state));
 		const editTool = createToolStub((pi) => registerEdit(pi, state));
 
-		await readTool.execute("read-1", { file_path: filePath }, undefined, undefined, createContext(tempDir));
+		await readTool.execute("read-1", { path: filePath }, undefined, undefined, createContext(tempDir));
 		await editTool.execute(
 			"edit-1",
 			{ file_path: filePath, old_string: "world", new_string: "pi" },

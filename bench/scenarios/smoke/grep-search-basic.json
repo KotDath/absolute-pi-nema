@@ -5,7 +5,7 @@
 	"prompt": "Use grep_search on {{fixtureRoot}} to find TODO comments and answer with the filenames only.",
 	"checks": {
 		"must_use_tools": ["grep_search"],
-		"must_not_use_tools": ["run_shell_command"],
+		"must_not_use_tools": ["bash"],
 		"final_text_includes": ["alpha.txt", "beta.js"]
 	}
 }

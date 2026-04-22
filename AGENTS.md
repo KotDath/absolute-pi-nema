@@ -5,7 +5,7 @@ This repository contains local `pi` extensions.
 ## What Is Here
 
 - `packages/absolute-qwen/`
-  Qwen-style coding tools for `pi`: `read_file`, `write_file`, `edit`, `run_shell_command`, `list_directory`, `grep_search`, `glob`.
+  Pi-compatible coding tools with qwen-style semantics: `read`, `write`, `edit`, `bash`, `list_directory`, `grep_search`, `glob`.
 - `packages/absolute-plan/`
   Placeholder plan-mode extension. It is present in the extension list but is intentionally minimal right now.
 - `scripts/`

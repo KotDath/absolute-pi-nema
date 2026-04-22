@@ -8,15 +8,7 @@ import { registerReadFile } from "./read-file.ts";
 import { registerRunShell } from "./run-shell.ts";
 import { registerWriteFile } from "./write-file.ts";
 
-export const ACTIVE_TOOL_NAMES = [
-	"read_file",
-	"write_file",
-	"edit",
-	"run_shell_command",
-	"list_directory",
-	"grep_search",
-	"glob",
-] as const;
+export const ACTIVE_TOOL_NAMES = ["read", "write", "edit", "bash", "list_directory", "grep_search", "glob"] as const;
 
 export function registerAllTools(pi: ExtensionAPI) {
 	const fileAccessState = new FileAccessState();

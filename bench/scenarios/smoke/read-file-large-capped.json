@@ -2,10 +2,10 @@
 	"id": "read-file-large-capped",
 	"suite": "smoke",
 	"fixture": "read-file-large",
-	"prompt": "Call read_file on {{fixtureRoot}}/large.txt using only file_path, with no offset and no limit. Then answer with the next offset needed after that first page only.",
+	"prompt": "Call read on {{fixtureRoot}}/large.txt using only path, with no offset and no limit. Then answer with the next offset needed after that first page only.",
 	"checks": {
-		"must_use_tools": ["read_file"],
-		"must_not_use_tools": ["run_shell_command"],
+		"must_use_tools": ["read"],
+		"must_not_use_tools": ["bash"],
 		"final_text_regex": "\\b251\\b"
 	}
 }

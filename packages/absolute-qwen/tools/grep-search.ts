@@ -157,8 +157,8 @@ export function registerGrepSearch(pi: ExtensionAPI) {
 			"KEYWORDS: [RegexSearch, ContentSearch, FileTarget, DirectoryTarget, GlobFilter, SearchFirst, RefineQuery, SummaryFirst, SnippetCap]",
 		promptSnippet: "RegexSearch content-search file-target glob-filter refine-query",
 		promptGuidelines: [
-			"Search-first: use grep_search for regex search instead of grep, rg, or find via run_shell_command.",
-			"Search-then-read: locate relevant files or lines with grep_search, then use read_file for nearby context.",
+			"Search-first: use grep_search for regex search instead of grep, rg, or find via bash.",
+			"Search-then-read: locate relevant files or lines with grep_search, then use read for nearby context.",
 		],
 		parameters: Params,
 		async execute(

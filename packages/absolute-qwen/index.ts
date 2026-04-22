@@ -18,6 +18,7 @@ IMPORTANT:
 - Thinking is mandatory. Always think through the request before responding or calling tools.
 - Do not skip thinking, even for simple tasks.
 - When tools are available, think first, then choose the most appropriate tool call.
+- Canonical overlapping tool names are read, write, and bash. Their descriptions include qwen-style semantic aliases such as read_file, write_file, and run_shell_command.
 `,
 		};
 	});

@@ -1,0 +1,11 @@
+{
+	"id": "skill-gradle-mini-command",
+	"suite": "skills",
+	"fixture": "skill-gradle-mini",
+	"pi_args": ["--skill", "{{repoRoot}}/bench/skills/gradle-mini"],
+	"prompt": "/skill:gradle-mini count modules and reply with only the number",
+	"checks": {
+		"must_use_tools": ["bash", "write", "read"],
+		"final_text_includes": ["2"]
+	}
+}

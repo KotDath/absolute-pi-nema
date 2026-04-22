@@ -5,7 +5,7 @@
 	"prompt": "Use list_directory on {{fixtureRoot}} and answer with the total number of entries only.",
 	"checks": {
 		"must_use_tools": ["list_directory"],
-		"must_not_use_tools": ["run_shell_command"],
+		"must_not_use_tools": ["bash"],
 		"tool_result_text_includes": [
 			{
 				"tool": "list_directory",

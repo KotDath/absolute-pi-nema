@@ -4,8 +4,8 @@
 	"fixture": "edit-after-read",
 	"prompt": "Read {{fixtureRoot}}/sample.txt, replace hello with hi using edit, then answer with the final first line only.",
 	"checks": {
-		"must_use_tools": ["read_file", "edit"],
-		"must_not_use_tools": ["run_shell_command", "write_file"],
+		"must_use_tools": ["read", "edit"],
+		"must_not_use_tools": ["bash", "write"],
 		"final_text_includes": ["hi"],
 		"files_exact": [
 			{

@@ -20,7 +20,7 @@ type ToolResultEntryLike = {
 	};
 };
 
-type LegacyToolName = "read_file" | "write_file" | "edit";
+type LegacyToolName = "read_file" | "write_file" | "read" | "write" | "edit";
 
 function normalizeTrackedPath(filePath: string): string {
 	return path.resolve(filePath);
@@ -63,7 +63,7 @@ export class FileAccessState {
 			}
 
 			const filePath = normalizeTrackedPath(legacyPath);
-			if (legacyToolName === "read_file") {
+			if (legacyToolName === "read_file" || legacyToolName === "read") {
 				const version = this.currentVersions.get(filePath) ?? 0;
 				this.currentVersions.set(filePath, version);
 				this.lastReadVersions.set(filePath, version);
@@ -93,12 +93,12 @@ export class FileAccessState {
 		const readVersion = this.lastReadVersions.get(normalized);
 
 		if (readVersion === undefined) {
-			throw new Error(`Use read_file on ${normalized} before calling ${toolName}.`);
+			throw new Error(`Use read on ${normalized} before calling ${toolName}.`);
 		}
 
 		if (readVersion !== currentVersion) {
 			throw new Error(
-				`Use read_file on ${normalized} again before calling ${toolName}; the file changed since it was last read.`,
+				`Use read on ${normalized} again before calling ${toolName}; the file changed since it was last read.`,
 			);
 		}
 	}

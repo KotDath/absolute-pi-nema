@@ -1,0 +1,11 @@
+{
+	"id": "skill-gradle-mini-auto",
+	"suite": "skills",
+	"fixture": "skill-gradle-mini",
+	"pi_args": ["--skill", "{{repoRoot}}/bench/skills/gradle-mini"],
+	"prompt": "Use the gradle-mini skill to inspect this repository and reply with the module count only.",
+	"checks": {
+		"must_use_tools": ["bash", "write", "read"],
+		"final_text_includes": ["2"]
+	}
+}

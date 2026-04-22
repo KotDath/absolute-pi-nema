@@ -2,14 +2,14 @@
 	"id": "shell-invalidates-read",
 	"suite": "guardrails",
 	"fixture": "requires-read",
-	"prompt": "Read the file {{fixtureRoot}}/guard.txt. Then use run_shell_command to overwrite that same file with the text beta followed by a newline. After that, immediately call edit on the same file to replace beta with gamma. Do not call read_file again after the shell command. If edit fails, answer FAILED.",
+	"prompt": "Read the file {{fixtureRoot}}/guard.txt. Then use bash to overwrite that same file with the text beta followed by a newline. After that, immediately call edit on the same file to replace beta with gamma. Do not call read again after the shell command. If edit fails, answer FAILED.",
 	"checks": {
-		"must_use_tools": ["read_file", "run_shell_command", "edit"],
+		"must_use_tools": ["read", "bash", "edit"],
 		"must_error_tools": ["edit"],
 		"tool_result_text_includes": [
 			{
 				"tool": "edit",
-				"text": "Use read_file on"
+				"text": "Use read on"
 			}
 		],
 		"final_text_includes": ["FAILED"]

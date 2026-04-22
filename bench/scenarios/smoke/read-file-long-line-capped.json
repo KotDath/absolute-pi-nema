@@ -2,10 +2,10 @@
 	"id": "read-file-long-line-capped",
 	"suite": "smoke",
 	"fixture": "read-file-long-line",
-	"prompt": "Use read_file on {{fixtureRoot}}/long.txt. Answer in one sentence saying whether the tool reported long-line truncation and also quote the second line exactly.",
+	"prompt": "Use read on {{fixtureRoot}}/long.txt. Answer in one sentence saying whether the tool reported long-line truncation and also quote the second line exactly.",
 	"checks": {
-		"must_use_tools": ["read_file"],
-		"must_not_use_tools": ["run_shell_command"],
+		"must_use_tools": ["read"],
+		"must_not_use_tools": ["bash"],
 		"final_text_includes": ["second line stays visible"],
 		"final_text_regex": "([Tt]runcat|1200)"
 	}

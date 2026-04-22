@@ -2,10 +2,10 @@
 
 # absolute-pi-nema
 
-**Absolute-path extensions for [pi](https://github.com/badlogic/pi-mono) with a Qwen-style tool surface.**
+**Absolute-path extensions for [pi](https://github.com/badlogic/pi-mono) with qwen-style semantics on a pi-compatible tool surface.**
 
 Local-first extension pack for `pi`:
-`read_file`, `write_file`, `edit`, `run_shell_command`, `list_directory`, `grep_search`, `glob`.
+`read`, `write`, `edit`, `bash`, `list_directory`, `grep_search`, `glob`.
 
 </div>
 
@@ -161,13 +161,15 @@ After editing `settings.json`, restart `pi` or run `/reload`.
 
 `absolute-qwen` replaces the default mental model with a more explicit tool surface:
 
-- `read_file`: bounded paginated reads with continuation hints
-- `write_file`: summary-first writes with overwrite guardrails
+- `read`: bounded paginated reads with continuation hints
+- `write`: summary-first writes with overwrite guardrails
 - `edit`: exact-match edits with diff previews
-- `run_shell_command`: streaming shell execution with full-log spooling
+- `bash`: streaming shell execution with full-log spooling
 - `grep_search`: bounded summary-first regex search
 - `glob`: pattern-based file discovery
 - `list_directory`: bounded directory listing with truncation metadata
+
+The canonical overlapping names are `read`, `write`, and `bash`, but their descriptions keep qwen-style semantic aliases such as `read_file`, `write_file`, and `run_shell_command`.
 
 The package is tuned for:
 

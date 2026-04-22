@@ -210,7 +210,14 @@ async function runPiScenario(scenario, fixtureRoot) {
 	}
 
 	if (Array.isArray(scenario.pi_args)) {
-		args.push(...scenario.pi_args.map(String));
+		args.push(
+			...scenario.pi_args.map((arg) =>
+				applyTemplate(String(arg), {
+					fixtureRoot,
+					repoRoot,
+				}),
+			),
+		);
 	}
 
 	if (process.env.PI_BENCH_PROVIDER) {

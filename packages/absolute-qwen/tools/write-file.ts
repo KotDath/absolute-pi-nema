@@ -10,7 +10,7 @@ import type { FileAccessState, FileTrackingDetails } from "../lib/file-access-st
 import { ensureAbsolutePath } from "../lib/path.ts";
 
 const Params = Type.Object({
-	file_path: Type.String({
+	path: Type.String({
 		description:
 			"The absolute path to the file to write to (e.g., '/home/user/project/file.txt'). Relative paths are not supported.",
 	}),
@@ -62,27 +62,27 @@ function prepareArguments(args: unknown): Params {
 	}
 
 	const input = args as { file_path?: unknown; path?: unknown };
-	if (typeof input.file_path === "string" || typeof input.path !== "string") {
+	if (typeof input.path === "string" || typeof input.file_path !== "string") {
 		return args as Params;
 	}
 
 	return {
 		...(args as Params),
-		file_path: input.path,
+		path: input.file_path,
 	};
 }
 
 export function registerWriteFile(pi: ExtensionAPI, fileAccessState: FileAccessState) {
 	pi.registerTool({
-		name: "write_file",
-		label: "Write File",
+		name: "write",
+		label: "Write",
 		description:
-			"PURPOSE: Write a file by absolute path, creating parent directories when needed. Use this for new files and full rewrites. Overwriting an existing file requires a fresh read_file of that same path first.\n" +
-			"KEYWORDS: [FileWrite, AbsolutePath, CreateFile, RewriteFile, ParentDirs, ReadBeforeOverwrite, SummaryFirst]",
-		promptSnippet: "FileWrite absolute-path create rewrite read-before-overwrite",
+			"PURPOSE: Write a file by absolute path, creating parent directories when needed. Use this for new files and full rewrites. Overwriting an existing file requires a fresh read of that same path first.\n" +
+			"KEYWORDS: [FileWrite, write_file, AbsolutePath, CreateFile, RewriteFile, ParentDirs, ReadBeforeOverwrite, SummaryFirst]",
+		promptSnippet: "FileWrite write_file absolute-path create rewrite read-before-overwrite",
 		promptGuidelines: [
-			"Create-or-rewrite: use write_file for new files or complete rewrites.",
-			"Read-before-overwrite: read an existing file with read_file before overwriting it with write_file.",
+			"Create-or-rewrite: use write for new files or complete rewrites.",
+			"Read-before-overwrite: read an existing file with read before overwriting it with write.",
 		],
 		parameters: Params,
 		prepareArguments,
@@ -95,7 +95,7 @@ export function registerWriteFile(pi: ExtensionAPI, fileAccessState: FileAccessS
 		): Promise<AgentToolResult<WriteFileDetails>> {
 			throwIfAborted(signal);
 
-			const filePath = ensureAbsolutePath(params.file_path, "File path");
+			const filePath = ensureAbsolutePath(params.path, "File path");
 			return withFileMutationQueue(filePath, async () => {
 				throwIfAborted(signal);
 
@@ -113,7 +113,7 @@ export function registerWriteFile(pi: ExtensionAPI, fileAccessState: FileAccessS
 						throw new Error(`Path is not a file: ${filePath}`);
 					}
 					overwritten = true;
-					fileAccessState.requireFreshRead(filePath, "write_file");
+					fileAccessState.requireFreshRead(filePath, "write");
 					const decoded = readFileWithEncoding(filePath);
 					existingContent = decoded.content;
 					encoding = decoded.encoding;

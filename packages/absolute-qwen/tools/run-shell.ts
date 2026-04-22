@@ -9,8 +9,8 @@ import { Type } from "@sinclair/typebox";
 import type { FileAccessState } from "../lib/file-access-state.ts";
 import { resolveWorkingDirectory } from "../lib/path.ts";
 
-const DEFAULT_TIMEOUT_MS = 120_000;
-const MAX_TIMEOUT_MS = 600_000;
+const DEFAULT_TIMEOUT_SECONDS = 120;
+const MAX_TIMEOUT_SECONDS = 600;
 const SPOOL_THRESHOLD_BYTES = 8 * 1024;
 const MAX_TAIL_LINES = 80;
 const MAX_TAIL_CHARS = 16 * 1024;
@@ -18,21 +18,28 @@ const MAX_TAIL_CHARS = 16 * 1024;
 const Params = Type.Object(
 	{
 		command: Type.String({ description: "The bash command to execute." }),
-		is_background: Type.Boolean({
-			description:
-				"Whether to run the command in the background. Use true for long-running processes like dev servers.",
-		}),
+		is_background: Type.Optional(
+			Type.Boolean({
+				description:
+					"Whether to run the command in the background. Use true for long-running processes like dev servers.",
+			}),
+		),
 		timeout: Type.Optional(
 			Type.Number({
-				description: "Optional timeout in milliseconds (max 600000ms / 10 minutes). Default is 120000ms (2 minutes).",
+				description: "Optional timeout in seconds (max 600s / 10 minutes). Default is 120s (2 minutes).",
 			}),
 		),
 		description: Type.Optional(
 			Type.String({ description: "Clear, concise description of what this command does in 5-10 words." }),
 		),
-		directory: Type.Optional(
+		cwd: Type.Optional(
 			Type.String({
 				description: "Optional working directory. Relative directories resolve from the current session cwd.",
+			}),
+		),
+		directory: Type.Optional(
+			Type.String({
+				description: "Compatibility alias for cwd. Relative directories resolve from the current session cwd.",
 			}),
 		),
 	},
@@ -68,13 +75,13 @@ function prepareArguments(args: unknown): Params {
 	}
 
 	const input = args as { cwd?: unknown; directory?: unknown };
-	if (typeof input.directory === "string" || typeof input.cwd !== "string") {
+	if (typeof input.cwd === "string" || typeof input.directory !== "string") {
 		return args as Params;
 	}
 
 	return {
 		...(args as Params),
-		directory: input.cwd,
+		cwd: input.directory,
 	};
 }
 
@@ -123,7 +130,7 @@ function buildFinalText(
 	fullOutputPath: string | undefined,
 	status: "success" | "error" | "timeout" | "aborted",
 	exitCode: number | null | undefined,
-	timeoutMs: number,
+	timeoutSeconds: number,
 ) {
 	let text = tail.content || "Command completed with no output.";
 
@@ -138,7 +145,7 @@ function buildFinalText(
 		return text;
 	}
 	if (status === "timeout") {
-		text += `\n\n[Timed out after ${timeoutMs}ms${fullOutputPath ? `. Full output: ${fullOutputPath}` : ""}]`;
+		text += `\n\n[Timed out after ${timeoutSeconds}s${fullOutputPath ? `. Full output: ${fullOutputPath}` : ""}]`;
 		return text;
 	}
 	if (status === "aborted") {
@@ -152,16 +159,16 @@ function buildFinalText(
 
 export function registerRunShell(pi: ExtensionAPI, fileAccessState: FileAccessState) {
 	pi.registerTool({
-		name: "run_shell_command",
-		label: "Run Shell Command",
+		name: "bash",
+		label: "Bash",
 		description:
 			"PURPOSE: Execute a bash command via `bash -lc` in the current project or a specified directory. Foreground commands stream live output updates, keep the latest tail in the model context, and save the full log to a temp file when output grows large. Background mode is a detached best-effort launch for long-running processes.\n" +
-			"KEYWORDS: [ShellExec, Build, Test, Git, PackageManager, StreamOutput, TailOutput, FullLog, BackgroundLaunch, NoFileRead, NoGrep]\n\n" +
+			"KEYWORDS: [ShellExec, run_shell_command, Build, Test, Git, PackageManager, StreamOutput, TailOutput, FullLog, BackgroundLaunch, NoFileRead, NoGrep]\n\n" +
 			"IMPORTANT: Use specialized tools for reading, writing, editing, listing, globbing, and grep-style search. This tool is for terminal operations such as git, package managers, build systems, test runners, and process control.",
-		promptSnippet: "ShellExec build test git stream-output full-log",
+		promptSnippet: "ShellExec run_shell_command build test git stream-output full-log",
 		promptGuidelines: [
-			"Terminal-workflows only: use run_shell_command for git, tests, builds, package managers, and process control.",
-			"No file-read/search fallback: do not use run_shell_command for file reads, edits, directory listing, globbing, or grep-style search when a specialized tool exists.",
+			"Terminal-workflows only: use bash for git, tests, builds, package managers, and process control.",
+			"No file-read/search fallback: do not use bash for file reads, edits, directory listing, globbing, or grep-style search when a specialized tool exists.",
 		],
 		parameters: Params,
 		prepareArguments,
@@ -172,11 +179,14 @@ export function registerRunShell(pi: ExtensionAPI, fileAccessState: FileAccessSt
 			onUpdate: AgentToolUpdateCallback<RunShellDetails> | undefined,
 			ctx: ExtensionContext,
 		): Promise<AgentToolResult<RunShellDetails>> {
-			const timeout = Math.min(Math.max(1, Math.trunc(params.timeout ?? DEFAULT_TIMEOUT_MS)), MAX_TIMEOUT_MS);
-			const cwd = resolveWorkingDirectory(params.directory, ctx.cwd);
+			const timeoutSeconds = Math.min(
+				Math.max(1, Math.trunc(params.timeout ?? DEFAULT_TIMEOUT_SECONDS)),
+				MAX_TIMEOUT_SECONDS,
+			);
+			const cwd = resolveWorkingDirectory(params.cwd ?? params.directory, ctx.cwd);
 			const startedAt = Date.now();
 
-			if (params.is_background) {
+			if (params.is_background === true) {
 				const child = spawn("bash", ["-lc", params.command], {
 					cwd,
 					detached: true,
@@ -295,7 +305,7 @@ export function registerRunShell(pi: ExtensionAPI, fileAccessState: FileAccessSt
 					}
 
 					closeTempFile(() => {
-						const text = buildFinalText(tail, tempFilePath, status, exitCode, timeout);
+						const text = buildFinalText(tail, tempFilePath, status, exitCode, timeoutSeconds);
 						const details: RunShellDetails = {
 							cwd,
 							exitCode,
@@ -333,7 +343,7 @@ export function registerRunShell(pi: ExtensionAPI, fileAccessState: FileAccessSt
 					.exec(params.command, cwd, {
 						onData: handleData,
 						signal,
-						timeout: timeout / 1000,
+						timeout: timeoutSeconds,
 					})
 					.then(({ exitCode }) => {
 						if (exitCode !== 0) {

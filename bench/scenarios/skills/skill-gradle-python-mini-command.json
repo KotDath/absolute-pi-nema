@@ -1,0 +1,21 @@
+{
+	"id": "skill-gradle-python-mini-command",
+	"suite": "skills",
+	"fixture": "skill-gradle-python-mini",
+	"pi_args": ["--skill", "{{repoRoot}}/bench/skills/gradle-python-mini"],
+	"prompt": "/skill:gradle-python-mini count modules and reply with only the number",
+	"checks": {
+		"must_use_tools": ["write", "bash", "read"],
+		"final_text_includes": ["3"],
+		"files_exact": [
+			{
+				"path": ".pi/output/python-summary.txt",
+				"content": "module_count: 3\n"
+			},
+			{
+				"path": "scripts/collect.py",
+				"content": "from pathlib import Path\n\nroot = Path.cwd()\nsettings = root / \"settings.gradle.kts\"\ntext = settings.read_text(encoding=\"utf-8\")\ncount = text.count('\":')\noutput = root / \".pi\" / \"output\" / \"python-summary.txt\"\noutput.parent.mkdir(parents=True, exist_ok=True)\noutput.write_text(f\"module_count: {count}\\n\", encoding=\"utf-8\")\nprint(f\"module_count: {count}\")\n"
+			}
+		]
+	}
+}
