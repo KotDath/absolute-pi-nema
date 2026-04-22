@@ -1,0 +1,16 @@
+{
+	"name": "@pi-nema/absolute-swarm",
+	"version": "0.1.0",
+	"description": "Internal task-cell runtime for collaborative swarm execution",
+	"type": "module",
+	"keywords": ["pi-package"],
+	"files": ["*.ts", "README.md", "!**/*.test.ts"],
+	"scripts": {
+		"build": "tsc --project ./tsconfig.json --noEmit",
+		"typecheck": "tsc --project ./tsconfig.json --noEmit",
+		"test": "vitest run"
+	},
+	"peerDependencies": {
+		"@types/node": "*"
+	}
+}
