@@ -29,6 +29,14 @@ export function resolveEventsPath(runDir: string): string {
 	return path.join(runDir, "events.jsonl");
 }
 
+export function resolveTracePath(runDir: string): string {
+	return path.join(runDir, "trace.jsonl");
+}
+
+export function resolveStderrPath(runDir: string): string {
+	return path.join(runDir, "stderr.log");
+}
+
 export function resolveConfigPath(runDir: string): string {
 	return path.join(runDir, "config.json");
 }
@@ -36,4 +44,3 @@ export function resolveConfigPath(runDir: string): string {
 export function resolveSessionDir(runDir: string): string {
 	return path.join(runDir, "session");
 }
-

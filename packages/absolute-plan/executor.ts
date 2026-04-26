@@ -7,6 +7,7 @@ import type {
 	TaskStatus,
 	VerificationStatus,
 } from "./types.js";
+import { createDefaultRetryState, getTaskRetryState } from "./retry.js";
 
 function cloneTask(task: TaskNode): TaskNode {
 	return {
@@ -18,10 +19,11 @@ function cloneTask(task: TaskNode): TaskNode {
 		changedFiles: [...task.changedFiles],
 		blockers: [...task.blockers],
 		notes: [...task.notes],
+		retry: { ...getTaskRetryState(task) },
 	};
 }
 
-function updateTask(graph: TaskGraph, taskId: string, updater: (task: TaskNode) => TaskNode): TaskGraph {
+export function updateTask(graph: TaskGraph, taskId: string, updater: (task: TaskNode) => TaskNode): TaskGraph {
 	return {
 		...graph,
 		tasks: graph.tasks.map((task) => (task.id === taskId ? updater(cloneTask(task)) : cloneTask(task))),
@@ -155,6 +157,7 @@ function createFollowUpTask(parent: TaskNode, graph: TaskGraph, result: TaskResu
 			score: 7,
 			reasoning: `follow-up created from ${parent.id} due to ${suffix}`,
 		},
+		retry: createDefaultRetryState(),
 	};
 }
 

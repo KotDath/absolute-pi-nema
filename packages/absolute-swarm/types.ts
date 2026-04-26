@@ -11,6 +11,27 @@ export interface TaskComplexity {
 	reasoning: string;
 }
 
+export interface SwarmTaskBrief {
+	planGoal: string;
+	taskPurpose: string;
+	upstreamContext: string[];
+	downstreamConstraints: string[];
+	definitionOfDone: string[];
+	verificationContext: string[];
+}
+
+export interface SwarmFailureSummary {
+	attempt: number;
+	kind: "failed" | "blocked";
+	summary: string;
+	blockers: string[];
+	validationsRun: string[];
+	changedFiles: string[];
+	notes: string[];
+	worktreePath?: string;
+	baseRef?: string;
+}
+
 export interface SwarmTaskInput {
 	id: string;
 	title: string;
@@ -21,6 +42,8 @@ export interface SwarmTaskInput {
 	hydrate: boolean;
 	complexity: TaskComplexity;
 	notes?: string[];
+	taskBrief: SwarmTaskBrief;
+	failureSummary?: SwarmFailureSummary;
 }
 
 export interface BlackboardEntry {

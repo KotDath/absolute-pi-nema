@@ -57,7 +57,32 @@ export const RequestUserInputSchema = Type.Object({
 });
 
 export const PlanExitSchema = Type.Object({
-	decision: Type.Optional(Type.Union([Type.Literal("approve"), Type.Literal("revise"), Type.Literal("reject")])),
+	decision: Type.Optional(Type.String({ minLength: 1 })),
+	feedback: Type.Optional(Type.String()),
+});
+
+export const GetRunsSchema = Type.Object({
+	status: Type.Optional(
+		Type.Union([
+			Type.Literal("queued"),
+			Type.Literal("running"),
+			Type.Literal("completed"),
+			Type.Literal("failed"),
+			Type.Literal("stopped"),
+		]),
+	),
+	mode: Type.Optional(Type.Union([Type.Literal("foreground"), Type.Literal("background")])),
+	limit: Type.Optional(Type.Number({ minimum: 1 })),
+});
+
+export const GetRunTraceSchema = Type.Object({
+	runId: Type.String({ minLength: 1 }),
+	raw: Type.Optional(Type.Boolean()),
+});
+
+export const GetCellStateSchema = Type.Object({
+	taskId: Type.Optional(Type.String({ minLength: 1 })),
+	runId: Type.Optional(Type.String({ minLength: 1 })),
 });
 
 export const TaskUpdateSchema = Type.Object({

@@ -1,0 +1,28 @@
+{
+	"id": "rust-audit-cli",
+	"suite": "planning",
+	"fixture": "planning-rust-audit-cli",
+	"plan_mode": true,
+	"plan_file": "plans/bench-plan.md",
+	"prompt": "Read {{fixtureRoot}}/SPEC.md, use planning mode to decompose the work, approve the plan, execute the scaffold, and stop only when the requested Rust files exist with substantive content. Reply with DONE only.",
+	"pi_args": ["--thinking", "low"],
+	"checks": {
+		"must_use_tools": ["read", "set_plan", "plan_exit"],
+		"final_text_includes": ["DONE"],
+		"files_exist": [
+			{ "path": "plans/bench-plan.md" },
+			{ "path": "Cargo.toml" },
+			{ "path": "src/main.rs" },
+			{ "path": "src/report.rs" },
+			{ "path": "docs/architecture.md" },
+			{ "path": "README.md" }
+		],
+		"files_include": [
+			{ "path": "Cargo.toml", "includes": ["name = \"workspace-audit\"", "clap", "serde", "serde_json", "toml", "anyhow"] },
+			{ "path": "src/main.rs", "includes": ["#[derive(Parser)]", "scan", "explain", "fix-plan"] },
+			{ "path": "src/report.rs", "includes": ["pub struct AuditReport"] },
+			{ "path": "docs/architecture.md", "includes": ["## Scanning pipeline", "## Rule engine", "## JSON output contract"] },
+			{ "path": "README.md", "includes": ["scan", "explain", "fix-plan"] }
+		]
+	}
+}

@@ -6,4 +6,6 @@ export const DEFAULT_WAIT_TIMEOUT_MS = 30_000;
 export const DEFAULT_WAIT_POLL_INTERVAL_MS = 100;
 export const STOP_POLL_INTERVAL_MS = 100;
 export const DEFAULT_AGENT_NAME = "worker";
-
+export const DEFAULT_TURN_TIMEOUT_MS = 120_000;
+export const DEFAULT_TURN_IDLE_TIMEOUT_MS = 180_000;
+export const TURN_KILL_GRACE_PERIOD_MS = 2_000;

@@ -22,6 +22,27 @@ function taskHeader(cell: TaskCell): string {
 		`Validation: ${cell.task.validation.join(" | ")}`,
 		`Complexity: ${cell.task.complexity.level} (${cell.task.complexity.score}) - ${cell.task.complexity.reasoning}`,
 		`Hydrate: ${cell.task.hydrate ? "yes" : "no"}`,
+		`Plan goal: ${cell.task.taskBrief.planGoal}`,
+		`Task purpose: ${cell.task.taskBrief.taskPurpose}`,
+		`Upstream context: ${cell.task.taskBrief.upstreamContext.join(" | ")}`,
+		`Downstream constraints: ${cell.task.taskBrief.downstreamConstraints.join(" | ")}`,
+		`Definition of done: ${cell.task.taskBrief.definitionOfDone.join(" | ")}`,
+		`Verification context: ${cell.task.taskBrief.verificationContext.join(" | ")}`,
+	].join("\n");
+}
+
+function failureContext(cell: TaskCell): string {
+	if (!cell.task.failureSummary) {
+		return "No previous failure summary.";
+	}
+	return [
+		`Previous attempt: ${cell.task.failureSummary.attempt}`,
+		`Failure kind: ${cell.task.failureSummary.kind}`,
+		`Failure summary: ${cell.task.failureSummary.summary}`,
+		`Known blockers: ${cell.task.failureSummary.blockers.join(" | ") || "none"}`,
+		`Validations already run: ${cell.task.failureSummary.validationsRun.join(" | ") || "none"}`,
+		`Changed files from failed attempt: ${cell.task.failureSummary.changedFiles.join(", ") || "none"}`,
+		`Notes: ${cell.task.failureSummary.notes.join(" | ") || "none"}`,
 	].join("\n");
 }
 
@@ -30,8 +51,13 @@ export function buildImplementerPlanPrompt(cell: TaskCell): string {
 		taskHeader(cell),
 		"",
 		"You are the implementer in a bounded task cell.",
+		"This is the planning phase only.",
+		"Do not create, edit, or overwrite files in this phase.",
 		"Produce the initial approach, key risks, and what the critic should challenge.",
+		"Stay strictly within the current task's write scope and deliverable.",
+		"Treat validation criteria as literal acceptance checks. If they contain required headings, labels, or phrases, plan to reproduce those exact phrases verbatim, preserving spelling and casing.",
 		"Write important facts into entries and direct questions into messages.",
+		`Failure summary:\n${failureContext(cell)}`,
 		`Return exactly one JSON object shaped like:\n${REPORT_SHAPE}`,
 	].join("\n");
 }
@@ -42,7 +68,9 @@ export function buildCriticPrompt(cell: TaskCell): string {
 		"",
 		"You are the critic in a bounded task cell.",
 		"Challenge the implementer plan, surface blockers and missing evidence, and route the most important feedback back to the implementer.",
+		"Call out any validation phrase that is likely to be missed or paraphrased; literal acceptance phrases should be preserved verbatim.",
 		"Only use blocked or failed if the task clearly cannot proceed safely.",
+		`Failure summary:\n${failureContext(cell)}`,
 		`Blackboard so far:\n${formatBlackboard(cell)}`,
 		`Mailbox so far:\n${formatMailbox(cell, "critic")}`,
 		"",
@@ -56,7 +84,11 @@ export function buildImplementerExecutionPrompt(cell: TaskCell): string {
 		"",
 		"You are the implementer in the execution phase.",
 		"Read the blackboard and critic feedback, then execute the task and return a concrete taskResult.",
+		"Only create or modify files inside the current write scope.",
+		"Do not create extra files, tooling, config, or documentation outside the current task unless the task explicitly requires it.",
+		"Treat validation criteria as literal acceptance checks. If they mention required headings, labels, or phrases, include those exact phrases verbatim in the artifact whenever possible, preserving spelling and casing.",
 		"If you cannot complete safely, return blocked or needs_review in taskResult.",
+		`Failure summary:\n${failureContext(cell)}`,
 		`Blackboard so far:\n${formatBlackboard(cell)}`,
 		`Mailbox for implementer:\n${formatMailbox(cell, "implementer")}`,
 		"",
@@ -70,7 +102,9 @@ export function buildVerifierPrompt(cell: TaskCell, implementerResult: CellTaskR
 		"",
 		"You are the verifier in a bounded task cell.",
 		"Check the implementer result against validation criteria and the blackboard evidence.",
+		"Treat validation criteria as literal acceptance checks. When they mention specific headings, labels, or phrases, verify those exact phrases case-sensitively unless the criterion explicitly allows variants.",
 		"If validation is insufficient, return blocked or needs_review.",
+		`Failure summary:\n${failureContext(cell)}`,
 		`Implementer task result:\n${JSON.stringify(implementerResult, null, 2)}`,
 		`Blackboard so far:\n${formatBlackboard(cell)}`,
 		`Mailbox for verifier:\n${formatMailbox(cell, "verifier")}`,

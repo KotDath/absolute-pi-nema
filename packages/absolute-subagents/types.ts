@@ -36,6 +36,7 @@ export interface AgentTurnResult {
 	error?: string;
 	messages: Message[];
 	usage: AgentUsage;
+	tracePath?: string;
 }
 
 export interface AgentResult {
@@ -69,6 +70,8 @@ export interface AgentRunState {
 	resultPath: string;
 	inboxPath: string;
 	eventsPath: string;
+	tracePath?: string;
+	stderrPath?: string;
 	lastError?: string;
 }
 
@@ -89,6 +92,8 @@ export interface SpawnAgentInput {
 	model?: string;
 	tools?: string[];
 	systemPrompt?: string;
+	timeoutMs?: number;
+	idleTimeoutMs?: number;
 }
 
 export interface AgentRunConfig {
@@ -103,9 +108,13 @@ export interface AgentRunConfig {
 	resultPath: string;
 	inboxPath: string;
 	eventsPath: string;
+	tracePath?: string;
+	stderrPath?: string;
 	model?: string;
 	tools?: string[];
 	systemPrompt?: string;
+	timeoutMs?: number;
+	idleTimeoutMs?: number;
 }
 
 export interface PiInvocation {
@@ -127,6 +136,8 @@ export interface ExecutionOptions {
 	model?: string;
 	tools?: string[];
 	systemPrompt?: string;
+	timeoutMs?: number;
+	idleTimeoutMs?: number;
 }
 
 export interface ExecutionOutcome {
@@ -137,4 +148,3 @@ export interface ExecutionOutcome {
 	messages: Message[];
 	usage: AgentUsage;
 }
-

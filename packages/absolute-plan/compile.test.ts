@@ -59,6 +59,11 @@ describe("absolute-plan compile", () => {
 						score: 0,
 						reasoning: "local scoped task with straightforward validation",
 					},
+					retry: {
+						attempt: 0,
+						maxAttempts: 2,
+						status: "idle",
+					},
 				},
 				{
 					id: "compile",
@@ -82,6 +87,11 @@ describe("absolute-plan compile", () => {
 						level: "high",
 						score: 6,
 						reasoning: "has 1 dependencies; marked high risk",
+					},
+					retry: {
+						attempt: 0,
+						maxAttempts: 2,
+						status: "idle",
 					},
 				},
 			],

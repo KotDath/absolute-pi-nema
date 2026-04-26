@@ -1,0 +1,28 @@
+{
+	"id": "python-data-quality",
+	"suite": "planning",
+	"fixture": "planning-python-data-quality",
+	"plan_mode": true,
+	"plan_file": "plans/bench-plan.md",
+	"prompt": "Read {{fixtureRoot}}/SPEC.md, build a concrete plan, approve it, execute the requested Python package scaffold, and stop only when all required files are present with substantive content. Reply with DONE only.",
+	"pi_args": ["--thinking", "low"],
+	"checks": {
+		"must_use_tools": ["read", "set_plan", "plan_exit"],
+		"final_text_includes": ["DONE"],
+		"files_exist": [
+			{ "path": "plans/bench-plan.md" },
+			{ "path": "pyproject.toml" },
+			{ "path": "src/data_quality_pipeline/cli.py" },
+			{ "path": "src/data_quality_pipeline/validators.py" },
+			{ "path": "docs/architecture.md" },
+			{ "path": "README.md" }
+		],
+		"files_include": [
+			{ "path": "pyproject.toml", "includes": ["typer", "pydantic", "polars", "pytest"] },
+			{ "path": "src/data_quality_pipeline/cli.py", "includes": ["Typer", "run", "inspect"] },
+			{ "path": "src/data_quality_pipeline/validators.py", "includes": ["SchemaRule", "def "] },
+			{ "path": "docs/architecture.md", "includes": ["## Pipeline stages", "## Validation contracts", "## Output artifacts"] },
+			{ "path": "README.md", "includes": ["operator", "failed-row"] }
+		]
+	}
+}

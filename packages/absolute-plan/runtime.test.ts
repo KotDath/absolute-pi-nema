@@ -16,6 +16,9 @@ describe("absolute-plan runtime wiring", () => {
 		expect(harness.tools.has("compile_plan")).toBe(true);
 		expect(harness.tools.has("plan_exit")).toBe(true);
 		expect(harness.tools.has("get_task_graph")).toBe(true);
+		expect(harness.tools.has("get_runs")).toBe(true);
+		expect(harness.tools.has("get_run_trace")).toBe(true);
+		expect(harness.tools.has("get_cell_state")).toBe(true);
 		expect(harness.tools.has("task_update")).toBe(true);
 		expect(harness.tools.has("record_task_result")).toBe(true);
 		expect(harness.tools.has("pause_execution")).toBe(true);
@@ -97,5 +100,23 @@ describe("absolute-plan runtime wiring", () => {
 
 		const [readResult] = await harness.emitAsync("tool_call", { toolName: "read", input: {} }, harness.ctx);
 		expect(readResult).toBeUndefined();
+	});
+
+	it("returns empty observability views when no runs or cells exist", async () => {
+		const harness = createExtensionHarness();
+		absolutePlanExtension(harness.pi);
+
+		const runs = await harness.tools.get("get_runs").execute("tool-runs", {}, undefined, undefined, harness.ctx);
+		expect(runs.content).toEqual([{ type: "text", text: "No subagent runs found." }]);
+
+		const trace = await harness.tools.get("get_run_trace").execute(
+			"tool-trace",
+			{ runId: "missing-run" },
+			undefined,
+			undefined,
+			harness.ctx,
+		);
+		expect(trace.isError).toBe(true);
+		expect(trace.content).toEqual([{ type: "text", text: "Unknown run: missing-run" }]);
 	});
 });

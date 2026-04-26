@@ -35,9 +35,24 @@ export function createSwarmRuntime(options: { roleRunner: RoleRunner }): SwarmRu
 			if (!cell) {
 				throw new Error(`Unknown cell: ${cellId}`);
 			}
-			const promise = runCellLifecycle(cell, options.roleRunner).finally(() => {
-				inFlight.delete(cellId);
-			});
+			const promise = runCellLifecycle(cell, options.roleRunner)
+				.catch((error) => {
+					cell.status = "failed";
+					cell.result = {
+						taskId: cell.task.id,
+						status: "failed",
+						summary: error instanceof Error ? error.message : String(error),
+						changedFiles: [],
+						validationsRun: [],
+						artifacts: [],
+						blockers: [error instanceof Error ? error.message : String(error)],
+						notes: ["absolute-swarm cell lifecycle threw before producing a terminal result."],
+					};
+					return cell;
+				})
+				.finally(() => {
+					inFlight.delete(cellId);
+				});
 			inFlight.set(cellId, promise);
 			return promise;
 		},

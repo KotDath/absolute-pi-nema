@@ -85,6 +85,14 @@ describe("absolute-swarm runtime", () => {
 			validation: ["Run tests."],
 			hydrate: false,
 			complexity: { level: "high", score: 7, reasoning: "cross-cutting task" },
+			taskBrief: {
+				planGoal: "Ship the feature",
+				taskPurpose: "Implement the feature task",
+				upstreamContext: ["No upstream tasks."],
+				downstreamConstraints: ["No downstream constraints."],
+				definitionOfDone: ["Run tests."],
+				verificationContext: ["Verify the feature."],
+			},
 		});
 
 		const completed = await runtime.runCell(cell.id);

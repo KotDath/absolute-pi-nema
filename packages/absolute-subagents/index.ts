@@ -58,6 +58,8 @@ function createRunConfig(input: SpawnAgentInput, ctx: ExtensionContext): { confi
 		model: input.model,
 		tools: input.tools,
 		systemPrompt: profile.systemPrompt,
+		timeoutMs: input.timeoutMs,
+		idleTimeoutMs: input.idleTimeoutMs,
 	};
 
 	const now = Date.now();
@@ -158,6 +160,8 @@ export default function absoluteSubagentsExtension(pi: ExtensionAPI) {
 					model: config.model,
 					tools: config.tools,
 					systemPrompt: config.systemPrompt,
+					timeoutMs: config.timeoutMs,
+					idleTimeoutMs: config.idleTimeoutMs,
 				});
 				const endedAt = Date.now();
 				const status: AgentRunStatus = turn.exitCode === 0 ? "completed" : "failed";

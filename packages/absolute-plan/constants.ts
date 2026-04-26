@@ -12,7 +12,11 @@ export const PLAN_TOOL_NAMES = [
 	"plan_exit",
 ] as const;
 export const EXECUTION_TOOL_NAMES = [
+	"get_plan",
 	"get_task_graph",
+	"get_runs",
+	"get_run_trace",
+	"get_cell_state",
 	"task_update",
 	"record_task_result",
 	"resume_execution",

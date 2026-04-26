@@ -78,6 +78,21 @@ function normalizeState(value: unknown): PlanModeState {
 		validation: value.validation as ValidationResult | undefined,
 		compiledTaskGraph: value.compiledTaskGraph as TaskGraph | undefined,
 		feedback: typeof value.feedback === "string" ? value.feedback : undefined,
+		review: isRecord(value.review)
+			? {
+					pending: Boolean(value.review.pending),
+					preview: typeof value.review.preview === "string" ? value.review.preview : "",
+					validationSummary: typeof value.review.validationSummary === "string" ? value.review.validationSummary : "",
+					requestedAt: typeof value.review.requestedAt === "number" ? value.review.requestedAt : 0,
+					feedback: typeof value.review.feedback === "string" ? value.review.feedback : undefined,
+					lastDecision:
+						value.review.lastDecision === "approve" ||
+						value.review.lastDecision === "revise" ||
+						value.review.lastDecision === "reject"
+							? value.review.lastDecision
+							: undefined,
+			  }
+			: undefined,
 		execution: isRecord(value.execution)
 			? {
 					paused: Boolean(value.execution.paused),
@@ -152,8 +167,7 @@ export function createPlanStateManager(pi: ExtensionAPI) {
 			pi.setActiveTools([...READ_ONLY_DISCOVERY_TOOL_NAMES, ...PLAN_TOOL_NAMES]);
 			return;
 		}
-		const restoredTools = state.previousActiveTools.length > 0 ? state.previousActiveTools : [...FALLBACK_ACTIVE_TOOL_NAMES];
-		pi.setActiveTools(uniqueTools([...restoredTools, ...EXECUTION_TOOL_NAMES]));
+		pi.setActiveTools([...EXECUTION_TOOL_NAMES]);
 	};
 
 	const setState = (ctx: ExtensionContext, nextState: PlanModeState, options?: { syncTools?: boolean }) => {
@@ -198,6 +212,7 @@ export function createPlanStateManager(pi: ExtensionAPI) {
 			validation: undefined,
 			compiledTaskGraph: undefined,
 			feedback: undefined,
+			review: undefined,
 			execution: undefined,
 		});
 	};
@@ -219,6 +234,7 @@ export function createPlanStateManager(pi: ExtensionAPI) {
 				validation,
 				compiledTaskGraph: taskGraph,
 				compiledTaskGraphId: `graph-${now.toString(36)}`,
+				review: undefined,
 				execution: {
 					...createInitialExecutionState(),
 					history: [
@@ -237,6 +253,7 @@ export function createPlanStateManager(pi: ExtensionAPI) {
 			state = {
 				...state,
 				active: false,
+				review: undefined,
 			};
 			persist();
 			pi.setActiveTools(restoredTools);

@@ -1,0 +1,28 @@
+{
+	"id": "browser-extension-triage",
+	"suite": "planning",
+	"fixture": "planning-browser-extension-triage",
+	"plan_mode": true,
+	"plan_file": "plans/bench-plan.md",
+	"prompt": "Read {{fixtureRoot}}/SPEC.md, plan the work, approve the plan, execute the implementation scaffold, and only finish after all requested extension files have been created. Reply with DONE only.",
+	"pi_args": ["--thinking", "low"],
+	"checks": {
+		"must_use_tools": ["read", "set_plan", "plan_exit"],
+		"final_text_includes": ["DONE"],
+		"files_exist": [
+			{ "path": "plans/bench-plan.md" },
+			{ "path": "manifest.json" },
+			{ "path": "src/background.ts" },
+			{ "path": "src/popup/App.tsx" },
+			{ "path": "src/lib/types.ts" },
+			{ "path": "docs/architecture.md" }
+		],
+		"files_include": [
+			{ "path": "manifest.json", "includes": ["\"manifest_version\": 3", "\"bookmarks\"", "\"storage\"", "\"tabs\""] },
+			{ "path": "src/background.ts", "includes": ["onInstalled", "message"] },
+			{ "path": "src/popup/App.tsx", "includes": ["Read", "Archive", "Investigate"] },
+			{ "path": "src/lib/types.ts", "includes": ["export interface", "BookmarkTriage"] },
+			{ "path": "docs/architecture.md", "includes": ["## Event flow", "## Storage model", "## Popup state management"] }
+		]
+	}
+}

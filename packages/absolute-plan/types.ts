@@ -8,6 +8,8 @@ export type PlanApprovalDecision = "approve" | "revise" | "reject" | "cancel";
 export type VerificationStatus = "pending" | "running" | "passed" | "failed";
 export type PlanItemRisk = "low" | "medium" | "high";
 export type TaskComplexityLevel = "low" | "medium" | "high";
+export type RetryFailureKind = "failed" | "blocked";
+export type RetryStatus = "idle" | "retrying" | "exhausted";
 
 export interface PlanRisk {
 	risk: string;
@@ -46,6 +48,37 @@ export interface TaskComplexity {
 	reasoning: string;
 }
 
+export interface TaskBrief {
+	planGoal: string;
+	taskPurpose: string;
+	upstreamContext: string[];
+	downstreamConstraints: string[];
+	definitionOfDone: string[];
+	verificationContext: string[];
+}
+
+export interface FailureSummary {
+	attempt: number;
+	kind: RetryFailureKind;
+	summary: string;
+	blockers: string[];
+	validationsRun: string[];
+	changedFiles: string[];
+	notes: string[];
+	worktreePath?: string;
+	baseRef?: string;
+}
+
+export interface TaskRetryState {
+	attempt: number;
+	maxAttempts: number;
+	status: RetryStatus;
+	lastFailureKind?: RetryFailureKind;
+	lastFailureSummary?: FailureSummary;
+	lastAttemptBaseRef?: string;
+	lastAttemptWorktreePath?: string;
+}
+
 export interface TaskNode {
 	id: string;
 	title: string;
@@ -65,6 +98,7 @@ export interface TaskNode {
 	hydrate: boolean;
 	followUpOf?: string;
 	complexity: TaskComplexity;
+	retry: TaskRetryState;
 }
 
 export interface TaskGraph {
@@ -94,6 +128,10 @@ export interface ExecutionHistoryEntry {
 		| "task_completed"
 		| "task_blocked"
 		| "task_failed"
+		| "task_retry_started"
+		| "task_retry_completed"
+		| "task_retry_failed"
+		| "task_retry_patch_applied"
 		| "task_followup_created"
 		| "verification_started"
 		| "verification_passed"
@@ -120,6 +158,15 @@ export interface ValidationResult {
 	valid: boolean;
 	errors: string[];
 	warnings: string[];
+}
+
+export interface PlanReviewState {
+	pending: boolean;
+	preview: string;
+	validationSummary: string;
+	requestedAt: number;
+	feedback?: string;
+	lastDecision?: Exclude<PlanApprovalDecision, "cancel">;
 }
 
 export interface PlanSummary {
@@ -149,6 +196,7 @@ export interface PlanModeState {
 	validation?: ValidationResult;
 	compiledTaskGraph?: TaskGraph;
 	feedback?: string;
+	review?: PlanReviewState;
 	execution?: ExecutionState;
 }
 

@@ -4,6 +4,10 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 
 const STOP_POLL_INTERVAL_MS = 100;
+const ENV_PATH_SEPARATOR = process.platform === "win32" ? ";" : ":";
+const DEFAULT_TURN_TIMEOUT_MS = 120_000;
+const DEFAULT_TURN_IDLE_TIMEOUT_MS = 180_000;
+const TURN_KILL_GRACE_PERIOD_MS = 2_000;
 
 function readJson(filePath) {
 	try {
@@ -21,6 +25,11 @@ function writeJson(filePath, value) {
 function appendJsonl(filePath, value) {
 	fs.mkdirSync(path.dirname(filePath), { recursive: true });
 	fs.appendFileSync(filePath, `${JSON.stringify(value)}\n`, "utf8");
+}
+
+function appendLine(filePath, line) {
+	fs.mkdirSync(path.dirname(filePath), { recursive: true });
+	fs.appendFileSync(filePath, line, "utf8");
 }
 
 function readInbox(inboxPath) {
@@ -45,15 +54,14 @@ function getPiInvocation(args) {
 		};
 	}
 
-	const currentScript = process.argv[1];
-	if (currentScript && fs.existsSync(currentScript)) {
-		return {
-			command: process.execPath,
-			args: [currentScript, ...args],
-		};
-	}
-
 	return { command: "pi", args };
+}
+
+function buildPiChildEnv() {
+	const env = { ...process.env };
+	delete env.ABSOLUTE_PLAN_AUTOENTER;
+	delete env.ABSOLUTE_PLAN_AUTOENTER_PATH;
+	return env;
 }
 
 function mergeUsage(usage, message) {
@@ -85,6 +93,32 @@ function getFinalText(messages) {
 	return "";
 }
 
+function getPartialAssistantText(partial) {
+	if (!partial || typeof partial !== "object" || !Array.isArray(partial.content)) {
+		return "";
+	}
+	for (let index = partial.content.length - 1; index >= 0; index -= 1) {
+		const item = partial.content[index];
+		if (item?.type === "text" && typeof item.text === "string") {
+			return item.text;
+		}
+	}
+	return "";
+}
+
+function getAssistantError(messages) {
+	for (let index = messages.length - 1; index >= 0; index -= 1) {
+		const message = messages[index];
+		if (message.role !== "assistant") {
+			continue;
+		}
+		if (message.stopReason === "error") {
+			return message.errorMessage?.trim() || "Assistant returned an error stop reason.";
+		}
+	}
+	return undefined;
+}
+
 function writePromptFile(systemPrompt) {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "absolute-subagent-runner-"));
 	const filePath = path.join(dir, "prompt.md");
@@ -92,8 +126,37 @@ function writePromptFile(systemPrompt) {
 	return { dir, filePath };
 }
 
+function resolveTurnTimeoutMs(timeoutMs) {
+	if (typeof timeoutMs === "number" && timeoutMs > 0) {
+		return timeoutMs;
+	}
+	const envValue = Number(process.env.ABSOLUTE_SUBAGENTS_TURN_TIMEOUT_MS);
+	return Number.isFinite(envValue) && envValue > 0 ? envValue : DEFAULT_TURN_TIMEOUT_MS;
+}
+
+function resolveTurnIdleTimeoutMs(idleTimeoutMs) {
+	if (typeof idleTimeoutMs === "number" && idleTimeoutMs > 0) {
+		return idleTimeoutMs;
+	}
+	const envValue = Number(process.env.ABSOLUTE_SUBAGENTS_TURN_IDLE_TIMEOUT_MS);
+	return Number.isFinite(envValue) && envValue > 0 ? envValue : DEFAULT_TURN_IDLE_TIMEOUT_MS;
+}
+
 async function executeTurn(config, envelope) {
 	const args = ["--mode", "json", "-p", "--session-dir", config.sessionDir];
+	const extensionPaths = process.env.ABSOLUTE_SUBAGENTS_EXTENSION_PATHS?.split(ENV_PATH_SEPARATOR)
+		.map((entry) => entry.trim())
+		.filter((entry) => entry.length > 0);
+	if (extensionPaths?.length) {
+		args.unshift("--no-extensions");
+		for (let index = extensionPaths.length - 1; index >= 0; index -= 1) {
+			args.unshift(extensionPaths[index]);
+			args.unshift("--extension");
+		}
+	}
+	if (process.env.ABSOLUTE_SUBAGENTS_OFFLINE === "1") {
+		args.unshift("--offline");
+	}
 	if (config.model) {
 		args.push("--models", config.model);
 	}
@@ -112,16 +175,55 @@ async function executeTurn(config, envelope) {
 	let usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 };
 	let stopReason;
 	let stderr = "";
+	const tracePath = config.tracePath;
+	const stderrPath = config.stderrPath;
+	const timeoutMs = resolveTurnTimeoutMs(config.timeoutMs);
+	const idleTimeoutMs = resolveTurnIdleTimeoutMs(config.idleTimeoutMs);
+	let timeoutError;
+	let idleTimeoutError;
+	let latestPartialAssistantText = "";
 
 	const child = spawn(invocation.command, invocation.args, {
 		cwd: config.cwd,
+		env: buildPiChildEnv(),
 		stdio: ["ignore", "pipe", "pipe"],
 		shell: false,
 	});
 	let buffer = "";
 	let stopInterval;
+	let timeoutHandle;
+	let killHandle;
+	let idleTimeoutHandle;
+	let shuttingDown = false;
 
 	const exitCode = await new Promise((resolve) => {
+		const terminateChild = (errorText) => {
+			if (shuttingDown) {
+				return;
+			}
+			shuttingDown = true;
+			if (!timeoutError && !idleTimeoutError) {
+				idleTimeoutError = errorText;
+			}
+			try {
+				child.kill("SIGTERM");
+			} catch {}
+			killHandle = setTimeout(() => {
+				try {
+					child.kill("SIGKILL");
+				} catch {}
+			}, TURN_KILL_GRACE_PERIOD_MS);
+		};
+
+		const resetIdleTimeout = () => {
+			if (idleTimeoutHandle) {
+				clearTimeout(idleTimeoutHandle);
+			}
+			idleTimeoutHandle = setTimeout(() => {
+				terminateChild(`Subagent turn became idle after ${idleTimeoutMs}ms without output.`);
+			}, idleTimeoutMs);
+		};
+
 		const processLine = (line) => {
 			if (!line.trim()) {
 				return;
@@ -134,6 +236,11 @@ async function executeTurn(config, envelope) {
 						usage = mergeUsage(usage, event.message);
 						stopReason = event.message.stopReason;
 					}
+				} else if (event.type === "message_update") {
+					const partialText = getPartialAssistantText(event.assistantMessageEvent?.partial);
+					if (partialText.trim()) {
+						latestPartialAssistantText = partialText;
+					}
 				}
 			} catch {
 				// Ignore malformed JSON lines.
@@ -141,7 +248,12 @@ async function executeTurn(config, envelope) {
 		};
 
 		child.stdout.on("data", (chunk) => {
-			buffer += chunk.toString("utf8");
+			const text = chunk.toString("utf8");
+			resetIdleTimeout();
+			if (tracePath) {
+				appendLine(tracePath, text);
+			}
+			buffer += text;
 			const lines = buffer.split("\n");
 			buffer = lines.pop() ?? "";
 			for (const line of lines) {
@@ -150,8 +262,19 @@ async function executeTurn(config, envelope) {
 		});
 
 		child.stderr.on("data", (chunk) => {
-			stderr += chunk.toString("utf8");
+			const text = chunk.toString("utf8");
+			resetIdleTimeout();
+			stderr += text;
+			if (stderrPath) {
+				appendLine(stderrPath, text);
+			}
 		});
+
+		timeoutHandle = setTimeout(() => {
+			timeoutError = `Subagent turn timed out after ${timeoutMs}ms.`;
+			terminateChild(timeoutError);
+		}, timeoutMs);
+		resetIdleTimeout();
 
 		stopInterval = setInterval(() => {
 			const state = readJson(config.statePath);
@@ -163,6 +286,15 @@ async function executeTurn(config, envelope) {
 		}, STOP_POLL_INTERVAL_MS);
 
 		child.on("close", (code) => {
+			if (timeoutHandle) {
+				clearTimeout(timeoutHandle);
+			}
+			if (idleTimeoutHandle) {
+				clearTimeout(idleTimeoutHandle);
+			}
+			if (killHandle) {
+				clearTimeout(killHandle);
+			}
 			if (buffer.trim()) {
 				processLine(buffer);
 			}
@@ -183,13 +315,31 @@ async function executeTurn(config, envelope) {
 		} catch {}
 	}
 
+	const finalText = getFinalText(messages) || latestPartialAssistantText;
+	const assistantError = getAssistantError(messages);
+	const normalizedExitCode =
+		exitCode === 0 &&
+		!timeoutError &&
+		!idleTimeoutError &&
+		!assistantError &&
+		finalText.trim().length > 0
+			? 0
+			: 1;
 	return {
-		exitCode,
-		finalText: getFinalText(messages),
+		exitCode: normalizedExitCode,
+		finalText,
 		stopReason,
-		error: exitCode === 0 ? undefined : stderr.trim() || undefined,
+		error:
+			normalizedExitCode === 0
+				? undefined
+				: timeoutError ||
+					idleTimeoutError ||
+					assistantError ||
+					stderr.trim() ||
+					"Subagent completed without a final assistant text response.",
 		messages,
 		usage,
+		tracePath,
 	};
 }
 
@@ -325,4 +475,3 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(im
 		process.exit(1);
 	});
 }
-

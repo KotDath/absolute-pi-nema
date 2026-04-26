@@ -1,0 +1,28 @@
+{
+	"id": "nextjs-support-console",
+	"suite": "planning",
+	"fixture": "planning-nextjs-support-console",
+	"plan_mode": true,
+	"plan_file": "plans/bench-plan.md",
+	"prompt": "Read {{fixtureRoot}}/SPEC.md, use planning mode to create and approve a plan, execute the requested Next.js scaffold, and finish only after the requested files exist. Reply with DONE only.",
+	"pi_args": ["--thinking", "low"],
+	"checks": {
+		"must_use_tools": ["read", "set_plan", "plan_exit"],
+		"final_text_includes": ["DONE"],
+		"files_exist": [
+			{ "path": "plans/bench-plan.md" },
+			{ "path": "package.json" },
+			{ "path": "app/layout.tsx" },
+			{ "path": "app/page.tsx" },
+			{ "path": "lib/incidents.ts" },
+			{ "path": "docs/architecture.md" }
+		],
+		"files_include": [
+			{ "path": "package.json", "includes": ["next", "react", "zod", "@tanstack/react-query"] },
+			{ "path": "app/layout.tsx", "includes": ["metadata", "children"] },
+			{ "path": "app/page.tsx", "includes": ["Support Operations Console", "queue", "escalation"] },
+			{ "path": "lib/incidents.ts", "includes": ["incidentSchema", "export"] },
+			{ "path": "docs/architecture.md", "includes": ["## Route structure", "## Data contracts", "## Implementation phases"] }
+		]
+	}
+}

@@ -1,0 +1,28 @@
+{
+	"id": "flutter-habit-board",
+	"suite": "planning",
+	"fixture": "planning-flutter-habit-board",
+	"plan_mode": true,
+	"plan_file": "plans/bench-plan.md",
+	"prompt": "Read {{fixtureRoot}}/SPEC.md, create a complete implementation-ready plan, approve it, execute it fully, and only finish after the requested files have been written. Reply with DONE only.",
+	"pi_args": ["--thinking", "low"],
+	"checks": {
+		"must_use_tools": ["read", "set_plan", "plan_exit"],
+		"final_text_includes": ["DONE"],
+		"files_exist": [
+			{ "path": "plans/bench-plan.md" },
+			{ "path": "pubspec.yaml" },
+			{ "path": "lib/app/app.dart" },
+			{ "path": "lib/features/habits/presentation/habit_dashboard_page.dart" },
+			{ "path": "docs/architecture.md" },
+			{ "path": "README.md" }
+		],
+		"files_include": [
+			{ "path": "pubspec.yaml", "includes": ["flutter_riverpod", "go_router", "drift", "sqlite3_flutter_libs"] },
+			{ "path": "lib/app/app.dart", "includes": ["class HabitBoardApp extends StatelessWidget", "MaterialApp.router"] },
+			{ "path": "lib/features/habits/presentation/habit_dashboard_page.dart", "includes": ["class HabitDashboardPage extends ConsumerWidget", "Today", "Streak", "Backlog"] },
+			{ "path": "docs/architecture.md", "includes": ["Offline-first", "## Folder layout", "## Testing strategy"] },
+			{ "path": "README.md", "includes": ["Scaffold", "data layer", "tests"], "ignore_case": true }
+		]
+	}
+}

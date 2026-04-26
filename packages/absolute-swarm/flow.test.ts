@@ -67,11 +67,66 @@ describe("absolute-swarm flow", () => {
 			validation: ["Run hard verification."],
 			hydrate: false,
 			complexity: { level: "high", score: 6, reasoning: "multiple files and verification burden" },
+			taskBrief: {
+				planGoal: "Finish the hard task",
+				taskPurpose: "Deliver the hard task safely",
+				upstreamContext: ["No upstream tasks."],
+				downstreamConstraints: ["No downstream constraints."],
+				definitionOfDone: ["Run hard verification."],
+				verificationContext: ["Hard verification is mandatory."],
+			},
 		});
 
 		const finished = await runtime.runCell(cell.id);
 		expect(finished.status).toBe("blocked");
 		expect(finished.result?.status).toBe("needs_review");
 		expect(finished.result?.blockers).toContain("Missing integration-level proof.");
+	});
+
+	it("converts lifecycle exceptions into failed cell results", async () => {
+		const runner: RoleRunner = {
+			async startRole(role) {
+				if (role === "critic") {
+					throw new Error("critic runner exploded");
+				}
+				return { runId: `run-${role}` };
+			},
+			async waitForRun() {
+				return {
+					status: "completed",
+					finalText: JSON.stringify({
+						summary: "Initial plan complete",
+						verdict: "continue",
+						entries: [],
+						messages: [],
+					}),
+				};
+			},
+			async stopRun() {},
+		};
+
+		const runtime = createSwarmRuntime({ roleRunner: runner });
+		const cell = runtime.createCell({
+			id: "task-c",
+			title: "Exceptional task",
+			spec: "Trigger an internal lifecycle exception.",
+			writeScope: ["task.ts"],
+			validation: ["Return a terminal result."],
+			hydrate: false,
+			complexity: { level: "medium", score: 4, reasoning: "exercise error conversion" },
+			taskBrief: {
+				planGoal: "Exercise error conversion",
+				taskPurpose: "Ensure runtime does not hang on thrown exceptions",
+				upstreamContext: ["No upstream tasks."],
+				downstreamConstraints: ["No downstream constraints."],
+				definitionOfDone: ["Return a terminal result."],
+				verificationContext: ["Runtime must surface thrown errors as failed cells."],
+			},
+		});
+
+		const finished = await runtime.runCell(cell.id);
+		expect(finished.status).toBe("failed");
+		expect(finished.result?.status).toBe("failed");
+		expect(finished.result?.summary).toContain("critic runner exploded");
 	});
 });

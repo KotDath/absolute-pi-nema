@@ -1,4 +1,5 @@
 import type { PlanDoc, PlanItem, TaskComplexity, TaskGraph } from "./types.js";
+import { createDefaultRetryState } from "./retry.js";
 import { validatePlanDoc } from "./validation.js";
 
 const COMPLEXITY_KEYWORD_PATTERN = /\b(refactor|architecture|protocol|workflow|runtime|coordinat|migrate|cross-cutting|orchestrat|state machine|multi-agent)\b/i;
@@ -57,8 +58,18 @@ function scorePlanItem(plan: PlanDoc, item: PlanItem): TaskComplexity {
 	};
 }
 
-function resolveExecutionMode(item: PlanItem, complexity: TaskComplexity): "single" | "swarm" {
+function resolveExecutionMode(plan: PlanDoc, item: PlanItem, complexity: TaskComplexity): "single" | "swarm" {
+	const scopedFiles = item.files.length > 0 ? item.files : plan.files;
 	if (item.executionMode === "single") {
+		return "single";
+	}
+	if (
+		item.executionMode === "swarm" &&
+		(item.hydrate || item.risk === "high" || scopedFiles.length > 1 || item.dependsOn.length > 1 || complexity.level === "high")
+	) {
+		return "swarm";
+	}
+	if (scopedFiles.length <= 1 && !item.hydrate && item.risk !== "high" && item.dependsOn.length <= 1) {
 		return "single";
 	}
 	if (complexity.level === "low") {
@@ -88,7 +99,7 @@ export function compilePlanDoc(plan: PlanDoc): TaskGraph {
 				dependsOn: [...item.dependsOn],
 				writeScope,
 				validation: [item.validation],
-				executionMode: resolveExecutionMode(item, complexity),
+				executionMode: resolveExecutionMode(plan, item, complexity),
 				owner: undefined,
 				artifacts: [],
 				changedFiles: [],
@@ -99,6 +110,7 @@ export function compilePlanDoc(plan: PlanDoc): TaskGraph {
 				hydrate: item.hydrate,
 				followUpOf: undefined,
 				complexity,
+				retry: createDefaultRetryState(),
 			};
 		}),
 	};

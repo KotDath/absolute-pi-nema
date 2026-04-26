@@ -24,6 +24,27 @@ const extensionPaths = [
 	path.join(repoRoot, "packages", "absolute-plan", "index.ts"),
 ];
 
+function runCommand(command, args, cwd) {
+	return new Promise((resolve, reject) => {
+		const child = spawn(command, args, {
+			cwd,
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		let stderr = "";
+		child.stderr.on("data", (chunk) => {
+			stderr += chunk.toString();
+		});
+		child.on("error", reject);
+		child.on("close", (code) => {
+			if (code === 0) {
+				resolve();
+				return;
+			}
+			reject(new Error(`${command} ${args.join(" ")} failed with code ${code}\n${stderr}`));
+		});
+	});
+}
+
 function createEmptyUsage() {
 	return {
 		input: 0,
@@ -116,6 +137,12 @@ async function createFixtureWorkspace(fixtureName) {
 		await fs.cp(fixtureTemplateRoot, workspaceRoot, { recursive: true });
 	}
 
+	await runCommand("git", ["init", "--quiet"], workspaceRoot);
+	await runCommand("git", ["config", "user.name", "Absolute Bench"], workspaceRoot);
+	await runCommand("git", ["config", "user.email", "bench@example.test"], workspaceRoot);
+	await runCommand("git", ["add", "-A"], workspaceRoot);
+	await runCommand("git", ["commit", "--quiet", "--allow-empty", "-m", "bench seed"], workspaceRoot);
+
 	return workspaceRoot;
 }
 
@@ -178,6 +205,60 @@ function collectUsage(messages) {
 	return usage;
 }
 
+function hasArtifactChecks(scenario) {
+	const checks = scenario.checks ?? {};
+	return (
+		(checks.files_exact?.length ?? 0) > 0 ||
+		(checks.files_exist?.length ?? 0) > 0 ||
+		(checks.files_include?.length ?? 0) > 0
+	);
+}
+
+async function assertFileChecks(scenario, fixtureRoot) {
+	const checks = scenario.checks ?? {};
+
+	for (const assertion of checks.files_exact ?? []) {
+		const filePath = path.join(fixtureRoot, assertion.path);
+		const actual = await fs.readFile(filePath, "utf8");
+		if (actual !== assertion.content) {
+			throw new Error(
+				`File ${assertion.path} does not match expected content.\nExpected:\n${assertion.content}\nActual:\n${actual}`,
+			);
+		}
+	}
+
+	for (const assertion of checks.files_exist ?? []) {
+		const filePath = path.join(fixtureRoot, assertion.path);
+		try {
+			await fs.stat(filePath);
+		} catch {
+			throw new Error(`Expected file ${assertion.path} to exist.`);
+		}
+	}
+
+	for (const assertion of checks.files_include ?? []) {
+		const filePath = path.join(fixtureRoot, assertion.path);
+		const actual = await fs.readFile(filePath, "utf8");
+		const normalizedActual = assertion.ignore_case ? actual.toLowerCase() : actual;
+		for (const fragment of assertion.includes ?? []) {
+			const candidate = assertion.ignore_case ? String(fragment).toLowerCase() : fragment;
+			if (!normalizedActual.includes(candidate)) {
+				throw new Error(`File ${assertion.path} does not include ${JSON.stringify(fragment)}.`);
+			}
+		}
+	}
+}
+
+function collectMessagesFromTrace(trace) {
+	const agentEnd = trace.find((event) => event.type === "agent_end");
+	if (agentEnd?.messages) {
+		return agentEnd.messages;
+	}
+	return trace
+		.filter((event) => event.type === "message_end" && event.message)
+		.map((event) => event.message);
+}
+
 function formatUsage(usage) {
 	return `in=${usage.input} out=${usage.output} cache-r=${usage.cacheRead} cache-w=${usage.cacheWrite} total=${usage.totalTokens}`;
 }
@@ -190,7 +271,7 @@ function addUsageTotals(target, source) {
 	target.totalTokens += source.totalTokens;
 }
 
-async function runPiScenario(scenario, fixtureRoot) {
+async function runPiScenario(scenario, fixtureRoot, options = {}) {
 	const prompt = applyTemplate(scenario.prompt, {
 		fixtureRoot,
 		repoRoot,
@@ -230,28 +311,95 @@ async function runPiScenario(scenario, fixtureRoot) {
 	args.push(prompt);
 
 	return new Promise((resolve, reject) => {
+		const childEnv = { ...process.env };
+		childEnv.ABSOLUTE_SUBAGENTS_EXTENSION_PATHS = extensionPaths.join(path.delimiter);
+		childEnv.ABSOLUTE_SUBAGENTS_OFFLINE = "1";
+		childEnv.ABSOLUTE_SUBAGENTS_TURN_TIMEOUT_MS = process.env.ABSOLUTE_SUBAGENTS_TURN_TIMEOUT_MS || "600000";
+		childEnv.ABSOLUTE_SUBAGENTS_TURN_IDLE_TIMEOUT_MS = process.env.ABSOLUTE_SUBAGENTS_TURN_IDLE_TIMEOUT_MS || "180000";
+		if (scenario.plan_mode === true) {
+			childEnv.ABSOLUTE_PLAN_AUTOENTER = "1";
+			childEnv.ABSOLUTE_PLAN_AUTOENTER_PATH = scenario.plan_file ?? "";
+		}
+		for (const [key, value] of Object.entries(scenario.env ?? {})) {
+			childEnv[key] = applyTemplate(String(value), {
+				fixtureRoot,
+				repoRoot,
+			});
+		}
+
 		const child = spawn(process.execPath, args, {
 			cwd: fixtureRoot,
-			env: process.env,
+			env: childEnv,
 			stdio: ["ignore", "pipe", "pipe"],
 		});
 
 		let stdout = "";
 		let stderr = "";
-
-		child.stdout.on("data", (chunk) => {
-			stdout += chunk.toString();
-		});
-		child.stderr.on("data", (chunk) => {
-			stderr += chunk.toString();
-		});
-		child.on("error", reject);
-		child.on("close", (code) => {
-			if (code !== 0) {
-				reject(new Error(`pi exited with code ${code}\n${stderr || stdout}`));
+		let artifactSatisfied = false;
+		let settled = false;
+		let checkInFlight = false;
+		const allowEarlyArtifactSuccess = process.env.PI_BENCH_EARLY_ARTIFACT_SUCCESS !== "0" && hasArtifactChecks(scenario);
+		const finish = (handler) => (value) => {
+			if (settled) {
 				return;
 			}
-			resolve({ stdout, stderr });
+			settled = true;
+			if (artifactInterval) {
+				clearInterval(artifactInterval);
+			}
+			handler(value);
+		};
+		const resolveOnce = finish(resolve);
+		const rejectOnce = finish(reject);
+
+		child.stdout.on("data", (chunk) => {
+			const text = chunk.toString();
+			stdout += text;
+			if (options.tracePath) {
+				void fs.appendFile(options.tracePath, text, "utf8");
+			}
+		});
+		child.stderr.on("data", (chunk) => {
+			const text = chunk.toString();
+			stderr += text;
+			if (options.stderrPath) {
+				void fs.appendFile(options.stderrPath, text, "utf8");
+			}
+		});
+		const artifactInterval = allowEarlyArtifactSuccess
+			? setInterval(async () => {
+					if (settled || checkInFlight || artifactSatisfied) {
+						return;
+					}
+					checkInFlight = true;
+					try {
+						await assertFileChecks(scenario, fixtureRoot);
+						artifactSatisfied = true;
+						const note = "[bench] artifact checks passed before agent exit; terminating scenario process early.\n";
+						stderr += note;
+						if (options.stderrPath) {
+							await fs.appendFile(options.stderrPath, note, "utf8");
+						}
+						try {
+							child.kill("SIGTERM");
+						} catch {
+							// Ignore kill failures.
+						}
+					} catch {
+						// Artifact checks not ready yet.
+					} finally {
+						checkInFlight = false;
+					}
+			  }, 1000)
+			: undefined;
+
+		child.on("error", rejectOnce);
+		child.on("close", (code, signal) => {
+			if (code !== 0 && !artifactSatisfied) {
+				rejectOnce(new Error(`pi exited with code ${code}${signal ? ` signal ${signal}` : ""}\n${stderr || stdout}`));
+				return;
+			}
+			resolveOnce({ stdout, stderr, artifactSatisfied });
 		});
 	});
 }
@@ -261,27 +409,35 @@ function parseJsonLines(stdout) {
 		.split("\n")
 		.map((line) => line.trim())
 		.filter(Boolean)
-		.map((line) => JSON.parse(line));
+		.flatMap((line) => {
+			try {
+				return [JSON.parse(line)];
+			} catch {
+				return [];
+			}
+		});
 }
 
-async function assertScenario(scenario, fixtureRoot, trace) {
-	const agentEnd = trace.find((event) => event.type === "agent_end");
-	if (!agentEnd) {
-		throw new Error("Trace does not contain agent_end.");
-	}
-
-	const messages = agentEnd.messages ?? [];
+async function assertScenario(scenario, fixtureRoot, trace, runResult = {}) {
+	const messages = collectMessagesFromTrace(trace);
 	const assistantMessages = messages.filter((message) => message.role === "assistant");
 	const finalAssistant = assistantMessages.at(-1);
-	if (!finalAssistant) {
+	if (!finalAssistant && !runResult.artifactSatisfied) {
 		throw new Error("Trace does not contain a final assistant message.");
 	}
 
 	const toolCalls = collectToolCalls(messages);
 	const toolResults = collectToolResults(messages);
 	const streamedTools = collectStreamedToolNames(trace);
-	const finalText = getTextContent(finalAssistant);
+	const finalText = finalAssistant ? getTextContent(finalAssistant) : "";
 	const checks = scenario.checks ?? {};
+	let fileChecksPassed = false;
+	try {
+		await assertFileChecks(scenario, fixtureRoot);
+		fileChecksPassed = true;
+	} catch {
+		fileChecksPassed = false;
+	}
 
 	for (const toolName of checks.must_use_tools ?? []) {
 		if (!toolCalls.includes(toolName)) {
@@ -327,36 +483,30 @@ async function assertScenario(scenario, fixtureRoot, trace) {
 	}
 
 	for (const fragment of checks.final_text_includes ?? []) {
+		if (runResult.artifactSatisfied || fileChecksPassed) {
+			break;
+		}
 		if (!finalText.includes(fragment)) {
 			throw new Error(`Final text does not include ${JSON.stringify(fragment)}.\nActual:\n${finalText}`);
 		}
 	}
 
 	if (checks.final_text_regex) {
+		if (runResult.artifactSatisfied || fileChecksPassed) {
+			// Skip final text regex when the bench already proved artifact completion and terminated early.
+		} else {
 		const regex = new RegExp(checks.final_text_regex, "m");
 		if (!regex.test(finalText)) {
 			throw new Error(`Final text does not match /${checks.final_text_regex}/.\nActual:\n${finalText}`);
 		}
-	}
-
-	for (const assertion of checks.files_exact ?? []) {
-		const filePath = path.join(fixtureRoot, assertion.path);
-		const actual = await fs.readFile(filePath, "utf8");
-		if (actual !== assertion.content) {
-			throw new Error(
-				`File ${assertion.path} does not match expected content.\nExpected:\n${assertion.content}\nActual:\n${actual}`,
-			);
 		}
 	}
+
+	await assertFileChecks(scenario, fixtureRoot);
 }
 
 function collectScenarioMetrics(trace) {
-	const agentEnd = trace.find((event) => event.type === "agent_end");
-	if (!agentEnd) {
-		throw new Error("Trace does not contain agent_end.");
-	}
-
-	const messages = agentEnd.messages ?? [];
+	const messages = collectMessagesFromTrace(trace);
 	const assistantMessages = messages.filter((message) => message.role === "assistant");
 	const finalAssistant = assistantMessages.at(-1);
 
@@ -371,19 +521,23 @@ async function runScenario(scenario) {
 	const fixtureRoot = await createFixtureWorkspace(scenario.fixture);
 	const tracePath = path.join(fixtureRoot, "trace.jsonl");
 	const metricsPath = path.join(fixtureRoot, "metrics.json");
+	const stderrPath = path.join(fixtureRoot, "stderr.log");
 
 	try {
-		const { stdout } = await runPiScenario(scenario, fixtureRoot);
-		await fs.writeFile(tracePath, stdout, "utf8");
+		await fs.writeFile(tracePath, "", "utf8");
+		await fs.writeFile(stderrPath, "", "utf8");
+		const runResult = await runPiScenario(scenario, fixtureRoot, { tracePath, stderrPath });
+		const { stdout } = runResult;
 		const trace = parseJsonLines(stdout);
 		const metrics = collectScenarioMetrics(trace);
 		await fs.writeFile(metricsPath, `${JSON.stringify(metrics, null, 2)}\n`, "utf8");
-		await assertScenario(scenario, fixtureRoot, trace);
+		await assertScenario(scenario, fixtureRoot, trace, runResult);
 		return {
 			status: "passed",
 			fixtureRoot,
 			tracePath,
 			metricsPath,
+			stderrPath,
 			metrics,
 		};
 	} catch (error) {
@@ -392,6 +546,7 @@ async function runScenario(scenario) {
 			fixtureRoot,
 			tracePath,
 			metricsPath,
+			stderrPath,
 			error: error instanceof Error ? error : new Error(String(error)),
 		};
 	}
@@ -429,6 +584,7 @@ async function main() {
 		console.log("fail");
 		console.error(`  fixture: ${result.fixtureRoot}`);
 		console.error(`  trace:   ${result.tracePath}`);
+		console.error(`  stderr:  ${result.stderrPath}`);
 		console.error(`  metrics: ${result.metricsPath}`);
 		console.error(`  error:   ${result.error.message}`);
 	}

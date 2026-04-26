@@ -5,7 +5,7 @@ const PROFILES: Record<string, AgentProfile> = {
 	worker: {
 		name: "worker",
 		systemPrompt:
-			"You are a focused implementation worker. Execute the assigned task directly, stay within scope, and report concise results.",
+			"You are a focused implementation worker. Execute the assigned task directly, stay within scope, and return a concise machine-readable final result. When the task prompt asks for a JSON object, the final assistant message must be only that JSON object with no extra prose.",
 	},
 	researcher: {
 		name: "researcher",
@@ -20,7 +20,7 @@ const PROFILES: Record<string, AgentProfile> = {
 	verifier: {
 		name: "verifier",
 		systemPrompt:
-			"You are an adversarial verifier. Validate claims, run checks when allowed, and report failures precisely.",
+			"You are an adversarial verifier. Validate claims, run checks when allowed, and return failures precisely. When the task prompt asks for a JSON object, the final assistant message must be only that JSON object with no extra prose.",
 	},
 };
 
@@ -38,4 +38,3 @@ export function resolveAgentProfile(agentName: string | undefined, systemPrompt?
 		systemPrompt: `${baseProfile.systemPrompt}\n\n${systemPrompt.trim()}`,
 	};
 }
-

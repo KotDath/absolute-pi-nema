@@ -8,6 +8,8 @@ export const SpawnAgentSchema = Type.Object({
 	model: Type.Optional(Type.String({ minLength: 1 })),
 	tools: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
 	systemPrompt: Type.Optional(Type.String({ minLength: 1 })),
+	timeoutMs: Type.Optional(Type.Number({ minimum: 1 })),
+	idleTimeoutMs: Type.Optional(Type.Number({ minimum: 1 })),
 });
 
 export const SendAgentMessageSchema = Type.Object({
@@ -38,4 +40,3 @@ export const ListAgentsSchema = Type.Object({
 	mode: Type.Optional(Type.Union([Type.Literal("foreground"), Type.Literal("background")])),
 	limit: Type.Optional(Type.Number({ minimum: 1 })),
 });
-

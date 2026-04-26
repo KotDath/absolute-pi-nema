@@ -171,6 +171,9 @@ export function validatePlanDoc(plan: PlanDoc): ValidationResult {
 		if (item.hydrate && item.status === "completed") {
 			warnings.push(`Plan item ${item.id || "(missing id)"} is marked hydrate but already completed.`);
 		}
+		if (plan.files.length > 1 && item.files.length === 0) {
+			warnings.push(`Plan item ${item.id || "(missing id)"} does not declare item.files and may be too broad.`);
+		}
 	}
 
 	if (inProgressCount > 1) {

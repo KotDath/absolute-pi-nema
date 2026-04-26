@@ -2,7 +2,17 @@ import { resolve } from "node:path";
 import { DEFAULT_WAIT_POLL_INTERVAL_MS, DEFAULT_WAIT_TIMEOUT_MS } from "../absolute-subagents/constants.js";
 import { appendJsonl, writeJson } from "../absolute-subagents/fs.js";
 import { createMessageId, createRunId } from "../absolute-subagents/ids.js";
-import { resolveConfigPath, resolveEventsPath, resolveInboxPath, resolveResultPath, resolveRunDir, resolveSessionDir, resolveStatePath } from "../absolute-subagents/paths.js";
+import {
+	resolveConfigPath,
+	resolveEventsPath,
+	resolveInboxPath,
+	resolveResultPath,
+	resolveRunDir,
+	resolveSessionDir,
+	resolveStatePath,
+	resolveStderrPath,
+	resolveTracePath,
+} from "../absolute-subagents/paths.js";
 import { resolveAgentProfile } from "../absolute-subagents/profiles.js";
 import { enqueueMessage } from "../absolute-subagents/queue.js";
 import { spawnBackgroundRunner } from "../absolute-subagents/background.js";
@@ -31,6 +41,8 @@ function createRunConfig(baseCwd: string, input: SpawnAgentInput): { config: Age
 	const resultPath = resolveResultPath(runDir);
 	const inboxPath = resolveInboxPath(runDir);
 	const eventsPath = resolveEventsPath(runDir);
+	const tracePath = resolveTracePath(runDir);
+	const stderrPath = resolveStderrPath(runDir);
 	const configPath = resolveConfigPath(runDir);
 
 	const config: AgentRunConfig = {
@@ -45,9 +57,13 @@ function createRunConfig(baseCwd: string, input: SpawnAgentInput): { config: Age
 		resultPath,
 		inboxPath,
 		eventsPath,
+		tracePath,
+		stderrPath,
 		model: input.model,
 		tools: input.tools,
 		systemPrompt: profile.systemPrompt,
+		timeoutMs: input.timeoutMs,
+		idleTimeoutMs: input.idleTimeoutMs,
 	};
 
 	const now = Date.now();
@@ -67,6 +83,8 @@ function createRunConfig(baseCwd: string, input: SpawnAgentInput): { config: Age
 		resultPath,
 		inboxPath,
 		eventsPath,
+		tracePath,
+		stderrPath,
 	};
 
 	return { config, state };
