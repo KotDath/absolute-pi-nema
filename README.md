@@ -43,7 +43,9 @@ absolute-pi-nema
 │   ├── absolute-qwen
 │   │   └── qwen-style coding tools for pi
 │   └── absolute-plan
-│       └── minimal plan-mode extension placeholder
+│   │   └── minimal plan-mode extension placeholder
+│   └── absolute-web
+│       └── keyless web search and content fetching
 ├── bench
 │   ├── fixtures
 │   └── scenarios
@@ -59,6 +61,7 @@ This is a small monorepo. Right now the only package most users need is `absolut
 | ------- | ---- | ------- |
 | [`@pi-nema/absolute-qwen`](./packages/absolute-qwen) | Qwen-style coding tools for `pi` with bounded reads/searches and hardened tool contracts | `pi install ./packages/absolute-qwen` |
 | [`@pi-nema/absolute-plan`](./packages/absolute-plan) | Minimal plan-mode extension placeholder | `pi install ./packages/absolute-plan` |
+| [`@pi-nema/absolute-web`](./packages/absolute-web) | Keyless DuckDuckGo/Exa web search and readable URL fetching | `pi install ./packages/absolute-web` |
 
 ## Local Install
 
@@ -96,11 +99,24 @@ Project-local:
 pi install -l ./packages/absolute-plan
 ```
 
+### Install `absolute-web`
+
+```bash
+pi install ./packages/absolute-web
+```
+
+Project-local:
+
+```bash
+pi install -l ./packages/absolute-web
+```
+
 ### Install Both Packages
 
 ```bash
 pi install ./packages/absolute-qwen
 pi install ./packages/absolute-plan
+pi install ./packages/absolute-web
 ```
 
 ## Configure In `settings.json`
@@ -133,7 +149,8 @@ Add `absolute-plan` too if you want both:
 {
   "packages": [
     "/home/kotdath/omp/personal/js/absolute-pi-nema/packages/absolute-qwen",
-    "/home/kotdath/omp/personal/js/absolute-pi-nema/packages/absolute-plan"
+    "/home/kotdath/omp/personal/js/absolute-pi-nema/packages/absolute-plan",
+    "/home/kotdath/omp/personal/js/absolute-pi-nema/packages/absolute-web"
   ]
 }
 ```

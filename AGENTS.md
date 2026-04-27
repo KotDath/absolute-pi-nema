@@ -8,6 +8,8 @@ This repository contains local `pi` extensions.
   Pi-compatible coding tools with qwen-style semantics: `read`, `write`, `edit`, `bash`, `list_directory`, `grep_search`, `glob`.
 - `packages/absolute-plan/`
   Placeholder plan-mode extension. It is present in the extension list but is intentionally minimal right now.
+- `packages/absolute-web/`
+  Keyless web search and content fetching tools for `pi`: `web_search`, `fetch_content`, `get_web_content`.
 - `scripts/`
   Runner scripts for real `pi` smoke/bench execution.
 - `bench/`
