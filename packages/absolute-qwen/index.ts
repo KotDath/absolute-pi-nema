@@ -1,11 +1,15 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { ACTIVE_TOOL_NAMES, registerAllTools } from "./tools/index.ts";
 
+function activateQwenTools(pi: ExtensionAPI) {
+	pi.setActiveTools([...new Set([...pi.getActiveTools(), ...ACTIVE_TOOL_NAMES])]);
+}
+
 export default function (pi: ExtensionAPI) {
 	registerAllTools(pi);
 
 	pi.on("session_start", () => {
-		pi.setActiveTools([...ACTIVE_TOOL_NAMES]);
+		activateQwenTools(pi);
 	});
 
 	pi.on("before_agent_start", async (event) => {

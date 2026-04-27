@@ -1,0 +1,31 @@
+{
+	"name": "@pi-nema/absolute-web",
+	"version": "0.1.0",
+	"description": "Keyless web search and content fetching extension for pi",
+	"type": "module",
+	"keywords": ["pi-package", "pi", "web-search", "web-fetch"],
+	"pi": {
+		"extensions": ["./index.ts"]
+	},
+	"files": ["index.ts", "lib/**/*.ts", "tools/**/*.ts", "README.md", "!**/*.test.ts"],
+	"scripts": {
+		"build": "tsc --project ./tsconfig.json --noEmit",
+		"test": "vitest run",
+		"typecheck": "tsc --project ./tsconfig.json --noEmit"
+	},
+	"peerDependencies": {
+		"@mariozechner/pi-agent-core": ">=0.67.0",
+		"@mariozechner/pi-ai": ">=0.67.0",
+		"@mariozechner/pi-coding-agent": ">=0.67.0",
+		"@mariozechner/pi-tui": ">=0.67.0",
+		"@sinclair/typebox": "*"
+	},
+	"dependencies": {
+		"@mozilla/readability": "^0.6.0",
+		"linkedom": "^0.18.12",
+		"turndown": "^7.2.2"
+	},
+	"devDependencies": {
+		"@types/turndown": "^5.0.5"
+	}
+}

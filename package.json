@@ -31,7 +31,8 @@
 	"pi": {
 		"extensions": [
 			"./packages/absolute-qwen/index.ts",
-			"./packages/absolute-plan/index.ts"
+			"./packages/absolute-plan/index.ts",
+			"./packages/absolute-web/index.ts"
 		]
 	}
 }
